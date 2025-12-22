@@ -14,12 +14,25 @@ Auto Accept Agent is an extension that instantly accepts agent file edits and te
 
 ![alt text](media/image.png)
 
-## Resilient Mode (Pro - $5/mo or $29/yr)
-- **Auto-Recovery**: Automatically detects and recovers when the agent gets stuck (e.g. "buttons not clicking").
-- **Background operation**: Works efficiently even when the window is not focused.
-- **Multi-Instance**: Run multiple IDE windows simultaneously.
-- **Adjustable Speed**: Fine-tune polling frequency to save ticks or maximize speed.
-- **Analytics**: Track clicks and sessions saved.
+## Pro Features ($5/month or $29/year)
+
+Auto Accept Pro is designed for developers running multiple AI agents who want things to keep moving without constant checking.
+
+- **Background Auto-Accept**  
+  Automatically accepts agent actions in background conversations, so you don’t need to keep each tab open.
+
+- **Multi-Conversation & Multi-Window Support**  
+  Works across multiple Cursor / Antigravity conversations and IDE windows at the same time.
+
+- **Persistent Auto-Accept**  
+  Pro remembers your auto-accept settings, so you don’t have to re-enable them every session.
+
+- **Configurable Accept Speed**  
+  Adjust polling speed to balance responsiveness and system usage.
+
+- **Status Visibility**  
+  See at a glance when Auto Accept is running and how many conversations are being handled.
+
 
 ## Installation
 - Just click download if you are in Antigravity or Cursor already

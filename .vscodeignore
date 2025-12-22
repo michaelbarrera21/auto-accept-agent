@@ -1,32 +1,32 @@
-# Exclude git stuff
+# VS Code Extension - Files to exclude from VSIX
+
+# Source files (we use bundled dist/)
+*.ts
+
+# Dev files
 .git
 .gitignore
-.vscodeignore
-
-# Exclude Dev/Test stuff
-**/*.map
-test/**
-smoke-test.js
-test_output.txt
-test_result.txt
-debug_node.txt
-errors.md
-features.md
-image.png
-
-# Exclude node_modules (WE ARE BUNDLED NOW!)
-node_modules/**
-!node_modules/ws/**
-
-# Exclude source files (since we use dist/extension.js)
-# You can leave them if you want source maps debugging, but for production:
-main_scripts/**
-settings-panel.js
-extension.js
-
-# IMPORTANT: INCLUDE DIST
-!dist/**
-
-# Keep package.json and README
+.vscode
 .env
+*.md
+!readme.md
+!TODO.md
+!LICENSE.md
 
+# Test files  
+test/
+*.test.js
+
+# Node modules (ws is bundled by esbuild)
+node_modules/
+
+# Temp/debug files
+*.log
+test-output.txt
+
+# Development scripts (keep main_scripts/)
+analyze-selectors.js
+discover-selectors.js
+investigate-antigravity.js
+test-*.js
+verify-*.js

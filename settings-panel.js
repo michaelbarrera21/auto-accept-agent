@@ -105,7 +105,10 @@ class SettingsPanel {
             vscode.window.showInformationMessage('Auto Accept: Pro status verified!');
             this.update();
         } else {
-            vscode.window.showWarningMessage('Pro license not found yet. It usually takes 1-2 minutes to sync.');
+            // New: Downgrade logic if check fails (e.g. subscription cancelled)
+            await this.context.globalState.update('auto-accept-isPro', false);
+            vscode.window.showWarningMessage('Pro license not found. Standard limits applied.');
+            this.update();
         }
     }
 
@@ -128,8 +131,8 @@ class SettingsPanel {
     }
 
     openUpgrade(promoCode) {
-         // Fallback legacy method or used by Settings
-         // We might not need this if we use direct links, but keeping for compatibility
+        // Fallback legacy method or used by Settings
+        // We might not need this if we use direct links, but keeping for compatibility
     }
 
     updateMode(mode) {
@@ -298,17 +301,35 @@ class SettingsPanel {
 
                 ${!isPro ? `
                 <div class="settings-section" style="border: 1px solid var(--accent);">
-                    <div style="font-weight: 600; margin-bottom: 8px;">Upgrade to Pro</div>
-                    <div style="font-size: 13px; margin-bottom: 16px; opacity: 0.8;">
-                        • Background operation<br/>
-                        • Multiple instances<br/>
-                        • Adjustable speed<br/>
-                        • Auto-recovery logic
+                    <div style="font-weight: 600; margin-bottom: 8px;">
+                        Upgrade to Pro
                     </div>
-                    <a href="${stripeLinks.MONTHLY}" class="btn-primary">Subscribe Monthly ($5/mo)</a>
-                    <a href="${stripeLinks.YEARLY}" class="btn-primary" style="background: transparent; border: 1px solid var(--border);">Subscribe Yearly ($29/yr)</a>
-                    <div class="link-secondary" id="checkStatusBtn">Already paid? Check status</div>
+
+                    <div style="font-size: 13px; margin-bottom: 12px; opacity: 0.9;">
+                        Run AI agents without babysitting.
+                    </div>
+
+                    <div style="font-size: 13px; margin-bottom: 16px; opacity: 0.8;">
+                        • Accept actions in background conversations — no tab watching<br/>
+                        • Works across multiple Cursor / Antigravity windows<br/>
+                        • Faster, configurable accept speed<br/>
+                        • Automatically handles stuck or pending agent actions
+                    </div>
+
+                    <a href="${stripeLinks.MONTHLY}" class="btn-primary">
+                        Subscribe Monthly — $5/month
+                    </a>
+
+                    <a href="${stripeLinks.YEARLY}" class="btn-primary"
+                        style="background: transparent; border: 1px solid var(--border);">
+                        Subscribe Yearly — $29/year
+                    </a>
+
+                    <div class="link-secondary" id="checkStatusBtn">
+                        Already paid? Check status
+                    </div>
                 </div>
+
                 ` : ''}
 
                 <div class="settings-section">
@@ -427,7 +448,7 @@ class SettingsPanel {
                 await this.context.globalState.update('auto-accept-isPro', true);
                 vscode.window.showInformationMessage('Auto Accept: Pro status verified! Thank you for your support.');
                 this.update(); // Refresh UI
-                vscode.commands.executeCommand('auto-accept.updateFrequency', 1000); 
+                vscode.commands.executeCommand('auto-accept.updateFrequency', 1000);
             }
         }, 5000);
     }

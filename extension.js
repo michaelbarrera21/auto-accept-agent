@@ -85,7 +85,7 @@ async function activate(context) {
         context.subscriptions.push(statusBarItem);
         statusBarItem.show();
 
-        statusSettingsItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 99);
+        statusSettingsItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 98);
         statusSettingsItem.command = 'auto-accept.openSettings';
         statusSettingsItem.text = '$(gear)';
         statusSettingsItem.tooltip = 'Auto Accept Settings & Pro Features';
@@ -93,7 +93,7 @@ async function activate(context) {
         statusSettingsItem.show();
 
         // Background Mode status bar item
-        statusBackgroundItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 98);
+        statusBackgroundItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 99);
         statusBackgroundItem.command = 'auto-accept.toggleBackground';
         statusBackgroundItem.text = '$(globe) Background: OFF';
         statusBackgroundItem.tooltip = 'Background Mode (Antigravity Pro only)';
@@ -463,7 +463,9 @@ function updateStatusBar() {
         // State-based status (both IDEs now use CDP state machine)
         if (agentState === 'running') {
             statusText = 'ON';
-            if (cdpHandler && cdpHandler.getConnectionCount() > 0) statusText += ' ✓';
+            if (cdpHandler && cdpHandler.getConnectionCount() > 0) {
+                tooltip += ' (CDP Connected)';
+            }
         } else if (agentState === 'stalled') {
             statusText = 'WAITING';
             tooltip = isPro ? 'Waiting. Nothing to click right now.' : 'Waiting. Nothing to click right now.';
