@@ -1,4 +1,5 @@
 const vscode = require('vscode');
+const path = require('path');
 
 // Lazy load SettingsPanel to avoid blocking activation
 let SettingsPanel = null;
@@ -61,15 +62,10 @@ function log(message) {
 }
 
 function detectIDE() {
-    try {
-        const appName = vscode.env.appName || '';
-        if (appName.toLowerCase().includes('cursor')) {
-            return 'cursor';
-        }
-    } catch (e) {
-        console.error('Error detecting IDE:', e);
-    }
-    return 'antigravity'; // Default
+    const appName = vscode.env.appName || '';
+    if (appName.toLowerCase().includes('cursor')) return 'Cursor';
+    if (appName.toLowerCase().includes('antigravity')) return 'Antigravity';
+    return 'Code'; // only supporting these 3 for now
 }
 
 async function activate(context) {
@@ -161,6 +157,16 @@ async function activate(context) {
             if (cdpHandler.setProStatus) {
                 cdpHandler.setProStatus(isPro);
             }
+
+            // Persistence logging
+            try {
+                const logPath = path.join(context.extensionPath, 'auto-accept-cdp.log');
+                cdpHandler.setLogFile(logPath);
+                log(`CDP logging to: ${logPath}`);
+            } catch (e) {
+                log(`Failed to set log file: ${e.message}`);
+            }
+
             relauncher = new Relauncher(log);
             log(`CDP handlers initialized for ${currentIDE}.`);
         } catch (err) {
@@ -209,13 +215,14 @@ async function activate(context) {
 async function ensureCDPOrPrompt(showPrompt = false) {
     if (!cdpHandler) return;
 
+    log('Checking for active CDP session...');
     const cdpAvailable = await cdpHandler.isCDPAvailable();
     log(`Environment check: CDP Available = ${cdpAvailable}`);
 
     if (cdpAvailable) {
-        await cdpHandler.start();
+        log('CDP is active and available.');
     } else {
-        log('CDP not available.');
+        log('CDP not found on expected ports (9222-9232).');
         // Only show the relaunch dialog if explicitly requested (user action)
         if (showPrompt && relauncher) {
             log('Prompting user for relaunch...');
@@ -228,9 +235,9 @@ async function ensureCDPOrPrompt(showPrompt = false) {
 
 async function checkEnvironmentAndStart() {
     if (isEnabled) {
-        // Both IDEs now use CDP - silent check on startup
+        log('Initializing Auto Accept environment...');
         await ensureCDPOrPrompt(false);
-        startPolling();
+        await startPolling();
     }
     updateStatusBar();
 }
@@ -250,11 +257,10 @@ async function handleToggle(context) {
             log('Auto Accept: Enabled');
             // Show relaunch prompt when user enables (if CDP not available)
             await ensureCDPOrPrompt(true);
-            startPolling();
+            await startPolling();
         } else {
             log('Auto Accept: Disabled');
-            stopPolling();
-            if (cdpHandler) await cdpHandler.stop();
+            await stopPolling();
         }
 
         log('  Calling updateStatusBar...');
@@ -276,6 +282,15 @@ async function handleRelaunch() {
     const result = await relauncher.relaunchWithCDP();
     if (!result.success) {
         vscode.window.showErrorMessage(`Relaunch failed: ${result.message}`);
+    }
+}
+
+async function handleFrequencyUpdate(context, freq) {
+    pollFrequency = freq;
+    await context.globalState.update(FREQ_STATE_KEY, freq);
+    log(`Poll frequency updated to: ${freq}ms`);
+    if (isEnabled) {
+        await syncSessions();
     }
 }
 
@@ -339,110 +354,84 @@ async function handleBackgroundToggle(context) {
         }
     }
 
+    if (isEnabled) {
+        await syncSessions();
+    }
+
     updateStatusBar();
 }
 
-let agentState = 'running'; // 'running' | 'stalled' | 'recovering' | 'recovered'
-let retryCount = 0;
-let hasSeenUpgradeModal = false;
-const MAX_RETRIES = 3;
 
-function startPolling() {
+
+async function syncSessions() {
+    if (cdpHandler && !isLockedOut) {
+        log(`CDP: Syncing sessions (Mode: ${backgroundModeEnabled ? 'Background' : 'Simple'})...`);
+        try {
+            await cdpHandler.start({
+                isPro,
+                isBackgroundMode: backgroundModeEnabled,
+                pollInterval: pollFrequency,
+                ide: currentIDE
+            });
+        } catch (err) {
+            log(`CDP: Sync error: ${err.message}`);
+        }
+    }
+}
+
+async function startPolling() {
     if (pollTimer) clearInterval(pollTimer);
-    log('Auto Accept: Polling started');
+    log('Auto Accept: Monitoring session...');
 
+    // Initial trigger
+    await syncSessions();
+
+    // Polling now primarily handles the Instance Lock and ensures CDP is active
     pollTimer = setInterval(async () => {
         if (!isEnabled) return;
 
-        // Locking Check for Antigravity (Non-Cursor)
-        if (currentIDE !== 'cursor') {
-            const allowed = await checkInstanceLock();
-            if (!allowed) {
+        // Check for instance locking - only the first extension instance should control CDP
+        const lockKey = `${currentIDE.toLowerCase()}-instance-lock`;
+        const activeInstance = globalContext.globalState.get(lockKey);
+        const myId = globalContext.extension.id;
+
+        if (activeInstance && activeInstance !== myId) {
+            const lastPing = globalContext.globalState.get(`${lockKey}-ping`);
+            if (lastPing && (Date.now() - lastPing) < 15000) {
                 if (!isLockedOut) {
+                    log(`CDP Control: Locked by another instance (${activeInstance}). Standby mode.`);
                     isLockedOut = true;
-                    log(`Instance Locked: Another VS Code window has the lock.`);
                     updateStatusBar();
                 }
                 return;
-            } else {
-                if (isLockedOut) {
-                    isLockedOut = false;
-                    log(`Instance Unlocked: Acquired lock.`);
-                    updateStatusBar();
-                }
             }
         }
 
-        // --- Core Loop (Simplified) ---
-        // Just execute accept - no stalled/stuck detection logic
-        if (agentState !== 'running') {
-            agentState = 'running';
+        // We are the leader or lock is dead
+        globalContext.globalState.update(lockKey, myId);
+        globalContext.globalState.update(`${lockKey}-ping`, Date.now());
+
+        if (isLockedOut) {
+            log('CDP Control: Lock acquired. Resuming control.');
+            isLockedOut = false;
             updateStatusBar();
         }
 
-        if (cdpHandler && cdpHandler.isEnabled) {
-            await executeAccept();
-        }
-
-    }, pollFrequency);
+        await syncSessions();
+    }, 5000);
 }
 
-function stopPolling() {
+async function stopPolling() {
     if (pollTimer) {
         clearInterval(pollTimer);
         pollTimer = null;
     }
+    if (cdpHandler) await cdpHandler.stop();
     log('Auto Accept: Polling stopped');
 }
 
-async function handleRecovery(attempt) {
-    if (!cursorCDP) return;
 
-    log(`Executing Recovery Strategy #${attempt}`);
 
-    try {
-        if (attempt === 1) {
-            await cdpHandler.executeAccept(true);
-        } else if (attempt === 2) {
-            // Strategy 2: Re-query / Force fresh selectors
-            await cdpHandler.executeAccept(true);
-        } else if (attempt === 3) {
-            // Strategy 3: Focus refresh simulation
-            await cdpHandler.executeAccept(true);
-        }
-
-        // Check if we succeeded? 
-        // We will know on the NEXT poll cycle if getStuckState returns 'running'.
-        // But we can optimistically set 'recovered' if we want, OR just wait.
-        // Let's wait for next poll to confirm success.
-    } catch (e) {
-        log(`Recovery attempt ${attempt} failed: ${e.message}`);
-    }
-}
-
-async function executeAccept() {
-    // Both IDEs use CDP - routing is handled internally
-    if (cdpHandler && cdpHandler.isEnabled) {
-        try {
-            // Pass backgroundModeEnabled && isPro to enable background mode
-            // cdp-handler routes to appropriate polling function:
-            //   - acceptPoll() for foreground mode
-            //   - cursorBackgroundPoll() for Cursor background (Pro)
-            //   - antigravityBackgroundPoll() for Antigravity background (Pro + tab cycling)
-            const allowBackground = backgroundModeEnabled && isPro;
-            const res = await cdpHandler.executeAccept(allowBackground);
-
-            // If we clicked something and we were recovering, we are now recovered!
-            if (res.executed > 0 && agentState === 'recovering') {
-                agentState = 'recovered';
-                log('State transition: recovering -> recovered');
-                updateStatusBar();
-            }
-        } catch (e) {
-            log(`CDP execution error: ${e.message}`);
-        }
-    }
-}
 
 function updateStatusBar() {
     if (!statusBarItem) return;
@@ -452,24 +441,8 @@ function updateStatusBar() {
         let tooltip = `Auto Accept is running.`;
         let bgColor = undefined;
 
-        // State-based status (both IDEs now use CDP state machine)
-        if (agentState === 'running') {
-            statusText = 'ON';
-            if (cdpHandler && cdpHandler.getConnectionCount() > 0) {
-                tooltip += ' (CDP Connected)';
-            }
-        } else if (agentState === 'stalled') {
-            statusText = 'WAITING';
-            tooltip = isPro ? 'Waiting. Nothing to click right now.' : 'Waiting. Nothing to click right now.';
-            bgColor = new vscode.ThemeColor('statusBarItem.warningBackground');
-        } else if (agentState === 'recovering') {
-            statusText = 'TRYING...';
-            tooltip = `Trying again (${retryCount}/${MAX_RETRIES})`;
-            bgColor = new vscode.ThemeColor('statusBarItem.warningBackground');
-        } else if (agentState === 'recovered') {
-            statusText = `FIXED (${retryCount})`;
-            tooltip = `Fixed after ${retryCount} tries.`;
-            bgColor = new vscode.ThemeColor('statusBarItem.errorBackground');
+        if (cdpHandler && cdpHandler.getConnectionCount() > 0) {
+            tooltip += ' (CDP Connected)';
         }
 
         if (isLockedOut) {

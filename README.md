@@ -1,42 +1,52 @@
-# Auto Accept Agent
+# Antigravity Auto Accept
 
-![demo](media/demo.gif)
-![cursor demo](media/cursor_demo.gif)
+## Instantly accepts agent file edits and terminal commands for you.
 
-Auto Accept Agent is an extension that instantly accepts agent file edits and terminal commands for you.
+Supported agent actions:
+  ✅ Terminal commands
+  ✅ File edits
+  ✅ Retry requests
 
-## Features
-- Instant and performant
-- Supports both Cursor and Antigravity
-- One-click toggle from the status bar with a clear OFF highlight
-- Works even when the window is not focused
-- Configure settings via `Auto Accept: Settings & Pro` command
+Using background global detection, auto accept agent manages all agent tasks, across windows and tabs.
 
-![alt text](media/image.png)
+---
 
-## Pro Features ($5/month or $29/year)
+![background mode](media/Screenshot%202025-12-22%20122227.png)
 
-Auto Accept Pro is designed for developers running multiple AI agents who want things to keep moving without constant checking.
+---
 
-- **Background Auto-Accept**  
-  Automatically accepts agent actions in background conversations, so you don’t need to keep each tab open.
+## Core Features
 
-- **Multi-Conversation & Multi-Window Support**  
-  Works across multiple Cursor / Antigravity conversations and IDE windows at the same time.
+### Background Automation (Pro)
+Execute agent tasks in all conversations continuously without manual intervention. The automation remains active and responsive even when the IDE is minimized or unfocused.
 
-- **Persistent Auto-Accept**  
-  Pro remembers your auto-accept settings, so you don’t have to re-enable them every session.
+### Real-time Status Tracking
+Monitor the state of your conversations through a streamlined visual overlay:
+- **In Progress (Purple)**: Active polling and automation execution.
+- **Completed (Green)**: Finalized state detection (triggered automatically).
 
-- **Configurable Accept Speed**  
-  Adjust polling speed to balance responsiveness and system usage.
+### Seamless Control
+- **Status Bar Toggle**: Instant management via the "Auto-Accept: ON/OFF" status bar item.
+- **Global Shortcut**: Toggle the agent instantly using the "Toggle ON/OFF" command.
+- **Integrated Settings**: Manage Pro features and global configurations through a unified control panel.
 
-- **Status Visibility**  
-  See at a glance when Auto Accept is running and how many conversations are being handled.
+---
 
+## Usage
 
-## Installation
-- Just click download if you are in Antigravity or Cursor already
-- Install the vsix file locally if you are in VS code marketplace, then restart your IDE
+1. Install the extension.
+2. Relaunch the IDE in one click.
+3. The extension activates automatically (Auto-Accept: ON) by default.
+4. Start an agent task and the extension will manage all subsequent confirmations.
 
+---
 
+## Requirements
 
+- Antigravity IDE (VS Code based) or Cursor.
+
+---
+
+## License
+
+MIT

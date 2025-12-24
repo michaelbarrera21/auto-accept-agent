@@ -1,20 +1,3 @@
-# Dependencies
-node_modules/
-
-# Environment variables
-.env
-
-# Build artifacts
-*.vsix
-dist/
-out/
-
-# VS Code
-.vscode/
-
-# Pro Features (Proprietary)
-main_scripts/scripts/antigravity_background.js
-main_scripts/scripts/cursor_background.js
-
-# Logs
-*.log
+* 
+!media
+!releases

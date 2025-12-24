@@ -17,8 +17,9 @@
 test/
 *.test.js
 
-# Node modules (ws is bundled by esbuild)
-node_modules/
+# Node modules
+node_modules/**
+!node_modules/ws/**
 
 # Temp/debug files
 *.log

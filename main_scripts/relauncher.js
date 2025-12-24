@@ -1,8 +1,4 @@
-/**
- * Relauncher
- * Cross-platform relauncher with CDP flag support.
- * Handles shortcut discovery, modification, and relaunch for all OS.
- */
+// relauches ide window with cdp enabling flag
 
 const vscode = require('vscode');
 const { execSync, spawn } = require('child_process');
@@ -42,11 +38,7 @@ class Relauncher {
         this.log(msg);
     }
 
-    // ==================== STEP 1: CDP CHECK ====================
-
-    /**
-     * Check if CDP is available on a port
-     */
+    // check if cdp is already running
     async isCDPRunning(port = BASE_CDP_PORT) {
         return new Promise((resolve) => {
             const req = http.get(`http://127.0.0.1:${port}/json/version`, (res) => {
@@ -60,26 +52,16 @@ class Relauncher {
         });
     }
 
-    // ==================== STEP 2: FIND SHORTCUTS ====================
-
-    /**
-     * Detect the current IDE name from vscode.env
-     */
+    // find shortcut for this ide
+    // handles windows mac and linux
     getIDEName() {
-        try {
-            const appName = vscode.env.appName || '';
-            if (appName.toLowerCase().includes('cursor')) return 'Cursor';
-            if (appName.toLowerCase().includes('antigravity')) return 'Antigravity';
-            return 'Code'; // VS Code fallback
-        } catch (e) {
-            return 'Cursor'; // Default
-        }
+        const appName = vscode.env.appName || '';
+        if (appName.toLowerCase().includes('cursor')) return 'Cursor';
+        if (appName.toLowerCase().includes('antigravity')) return 'Antigravity';
+        return 'Code'; // only supporting these 3 for now
     }
 
-    /**
-     * Find all shortcuts for the current IDE
-     * Returns array of { path, hasFlag, type }
-     */
+
     async findIDEShortcuts() {
         const ideName = this.getIDEName();
         this.log(`Finding shortcuts for: ${ideName}`);
@@ -90,8 +72,9 @@ class Relauncher {
             return await this._findMacOSShortcuts(ideName);
         } else {
             return await this._findLinuxShortcuts(ideName);
-        }
+        } // only supporting these 3 platforms for now
     }
+
 
     async _findWindowsShortcuts(ideName) {
         const shortcuts = [];
@@ -121,6 +104,7 @@ class Relauncher {
         this.log(`Found ${shortcuts.length} Windows shortcuts`);
         return shortcuts;
     }
+
 
     async _readWindowsShortcut(shortcutPath) {
         const scriptPath = path.join(os.tmpdir(), 'auto_accept_read_shortcut.ps1');
@@ -170,6 +154,7 @@ try {
         }
     }
 
+
     async _findMacOSShortcuts(ideName) {
         const shortcuts = [];
 
@@ -198,6 +183,7 @@ try {
         return shortcuts;
     }
 
+
     async _findLinuxShortcuts(ideName) {
         const shortcuts = [];
         const desktopLocations = [
@@ -224,12 +210,8 @@ try {
         return shortcuts;
     }
 
-    // ==================== STEP 3: MODIFY SHORTCUTS ====================
 
-    /**
-     * Ensure the shortcut has the CDP flag
-     * Returns { success, modified, message }
-     */
+    // add flag to shortcut if absent
     async ensureShortcutHasFlag(shortcut) {
         if (shortcut.hasFlag) {
             return { success: true, modified: false, message: 'Already has CDP flag' };
@@ -243,6 +225,7 @@ try {
             return await this._modifyLinuxDesktop(shortcut.path);
         }
     }
+
 
     async _modifyWindowsShortcut(shortcutPath) {
         const scriptPath = path.join(os.tmpdir(), 'auto_accept_modify_shortcut.ps1');
@@ -317,6 +300,7 @@ try {
         }
     }
 
+
     async _createMacOSWrapper() {
         const ideName = this.getIDEName();
         const wrapperDir = path.join(os.homedir(), '.local', 'bin');
@@ -379,6 +363,7 @@ open -a "${appBundle}" --args ${CDP_FLAG} "$@"
         }
     }
 
+
     async _modifyLinuxDesktop(desktopPath) {
         try {
             let content = fs.readFileSync(desktopPath, 'utf8');
@@ -410,20 +395,15 @@ open -a "${appBundle}" --args ${CDP_FLAG} "$@"
         }
     }
 
-    // ==================== STEP 4: RELAUNCH ====================
 
-    /**
-     * Get current workspace folders as command line arguments
-     */
+    // get current workspace to relaunch the same workspace
     getWorkspaceFolders() {
         const folders = vscode.workspace.workspaceFolders;
         if (!folders || folders.length === 0) return [];
         return folders.map(f => f.uri.fsPath);
     }
 
-    /**
-     * Relaunch the IDE via the modified shortcut
-     */
+    // relaunch ide via the new shortcut
     async relaunchViaShortcut(shortcut) {
         const workspaceFolders = this.getWorkspaceFolders();
 
@@ -614,12 +594,7 @@ exit 1
         }
     }
 
-    // ==================== MAIN ENTRY POINT ====================
-
-    /**
-     * Single entry point: Check CDP → Find Shortcut → Modify → Relaunch
-     * Called from the single notification hook in extension.js
-     */
+    // main function
     async relaunchWithCDP() {
         this.log('Starting relaunchWithCDP flow...');
 
@@ -682,16 +657,12 @@ exit 1
         }
     }
 
-    /**
-     * Legacy compatibility: Alias for launchAndReplace
-     */
+    // legacy compatibility: wrapper for relaunch with cdp
     async launchAndReplace() {
         return await this.relaunchWithCDP();
     }
 
-    /**
-     * Show the single relaunch prompt (single notification hook)
-     */
+    // prompt user for relaunch
     async showRelaunchPrompt() {
         this.log('Showing relaunch prompt');
 
@@ -718,9 +689,7 @@ exit 1
         return 'cancelled';
     }
 
-    /**
-     * Legacy compatibility: Alias for showLaunchPrompt  
-     */
+    // legacy compatibility: wrapper for show relaunch prompt
     async showLaunchPrompt() {
         return await this.showRelaunchPrompt();
     }

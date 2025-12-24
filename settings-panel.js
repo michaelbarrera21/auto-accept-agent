@@ -167,7 +167,11 @@ class SettingsPanel {
     getHtmlContent() {
         const isPro = this.isPro();
         const isPrompt = this.mode === 'prompt';
-        const stripeLinks = STRIPE_LINKS; // { MONTHLY, YEARLY }
+        const userId = this.getUserId();
+        const stripeLinks = {
+            MONTHLY: `${STRIPE_LINKS.MONTHLY}?client_reference_id=${userId}`,
+            YEARLY: `${STRIPE_LINKS.YEARLY}?client_reference_id=${userId}`
+        };
 
         // Common CSS
         const css = `

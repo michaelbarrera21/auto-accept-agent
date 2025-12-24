@@ -8,7 +8,7 @@ var require_config = __commonJS({
   "config.js"(exports2, module2) {
     module2.exports = {
       STRIPE_LINKS: {
-        MONTHLY: "https://buy.stripe.com/4gM4gz7v37dRajd5989MY0t",
+        MONTHLY: "https://buy.stripe.com/7sY00j3eN0Pt9f94549MY0v",
         YEARLY: "https://buy.stripe.com/3cI3cv5mVaq3crlfNM9MY0u"
       }
     };
@@ -153,7 +153,11 @@ var require_settings_panel = __commonJS({
       getHtmlContent() {
         const isPro2 = this.isPro();
         const isPrompt = this.mode === "prompt";
-        const stripeLinks = STRIPE_LINKS;
+        const userId = this.getUserId();
+        const stripeLinks = {
+          MONTHLY: `${STRIPE_LINKS.MONTHLY}?client_reference_id=${userId}`,
+          YEARLY: `${STRIPE_LINKS.YEARLY}?client_reference_id=${userId}`
+        };
         const css = `
             :root {
                 --bg-color: var(--vscode-editor-background);
@@ -4055,264 +4059,67 @@ var require_ws = __commonJS({
 // main_scripts/cdp-handler.js
 var require_cdp_handler = __commonJS({
   "main_scripts/cdp-handler.js"(exports2, module2) {
-    var WebSocket;
-    try {
-      WebSocket = require_ws();
-    } catch (e) {
-      console.error(`[CDP] Failed to require 'ws'. Current dir: ${__dirname}`);
-      try {
-        console.error(`[CDP] node_modules exists? ${require("fs").existsSync(require("path").join(__dirname, "../node_modules"))}`);
-        console.error(`[CDP] ws exists? ${require("fs").existsSync(require("path").join(__dirname, "../node_modules/ws"))}`);
-      } catch (fsErr) {
-      }
-      throw e;
-    }
+    var WebSocket = require_ws();
     var http = require("http");
     var fs = require("fs");
-    var path = require("path");
-    var CDP_PORT_START = 9222;
-    var CDP_PORT_END = 9232;
+    var path2 = require("path");
     var LOG_PREFIX = "[CDP]";
-    function loadScripts() {
-      const possiblePaths = [
-        path.join(__dirname, "scripts"),
-        // Development: main_scripts/scripts
-        path.join(__dirname, "..", "main_scripts", "scripts"),
-        // Bundled from dist: ../main_scripts/scripts
-        path.join(__dirname, "main_scripts", "scripts")
-        // Extension root: main_scripts/scripts
-      ];
-      let scriptsDir = null;
-      for (const p of possiblePaths) {
-        if (fs.existsSync(p) && fs.existsSync(path.join(p, "core.js"))) {
-          scriptsDir = p;
-          console.log(`${LOG_PREFIX} Found scripts at: ${p}`);
-          break;
-        }
-      }
-      if (!scriptsDir) {
-        console.error(`${LOG_PREFIX} Could not find scripts directory! Tried:`, possiblePaths);
-        return `(function() { 
-            console.error('[AutoAccept] Scripts not found - path resolution failed');
-            window.__autoAcceptCDP = { 
-                getIDE: function() { return { name: 'Error', isAntigravity: false, error: 'Scripts not found' }; },
-                acceptPoll: function() { return { clicked: false, error: 'Scripts not found' }; },
-                cursorBackgroundPoll: function() { return { clicked: false, error: 'Scripts not found' }; },
-                antigravityBackgroundPoll: function() { return Promise.resolve({ clicked: false, error: 'Scripts not found' }); },
-                isWindowFocused: function() { return document.hasFocus(); },
-                checkWindowUnfocused: function() { return !document.hasFocus(); },
-                getDiagnostics: function() { return { error: 'Scripts not found' }; }
-            };
-        })();`;
-      }
-      const scriptOrder = [
-        "core.js",
-        "window_focus.js",
-        "accept_poll.js",
-        "cursor_background.js",
-        "conversation_logic.js",
-        "antigravity_background.js"
-      ];
-      let combined = "// Auto-Accept CDP Injection Script (composed)\n";
-      combined += '(function() {\n"use strict";\n\n';
-      combined += "var __scriptErrors = [];\n\n";
-      for (const scriptName of scriptOrder) {
-        const scriptPath = path.join(scriptsDir, scriptName);
-        try {
-          const content = fs.readFileSync(scriptPath, "utf8");
-          combined += `// === ${scriptName} ===
-`;
-          combined += `try {
-`;
-          combined += content + "\n";
-          combined += `} catch(e) { __scriptErrors.push({script: "${scriptName}", error: e.message}); console.error("[AutoAccept] Failed to load ${scriptName}:", e); }
-
-`;
-        } catch (e) {
-          console.error(`${LOG_PREFIX} Failed to load ${scriptName}:`, e.message);
-        }
-      }
-      combined += `
-// === MAIN API ===
-window.__autoAcceptCDP = {
-    // Get script loading errors
-    getScriptErrors: function() {
-        return __scriptErrors;
-    },
-    
-    // Get IDE info - with safety check
-    getIDE: function() {
-        if (!window.__autoAcceptCore || !window.__autoAcceptCore.detectIDE) {
-            return { name: 'Unknown', isAntigravity: false, isCursor: false, error: 'Core not loaded' };
-        }
-        return window.__autoAcceptCore.detectIDE();
-    },
-    
-    // Check window focus - with safety check
-    isWindowFocused: function() {
-        if (!window.__autoAcceptFocus || !window.__autoAcceptFocus.isWindowFocused) {
-            return document.hasFocus(); // Fallback
-        }
-        return window.__autoAcceptFocus.isWindowFocused();
-    },
-    
-    checkWindowUnfocused: function() {
-        if (!window.__autoAcceptFocus || !window.__autoAcceptFocus.checkWindowUnfocused) {
-            return !document.hasFocus(); // Fallback
-        }
-        return window.__autoAcceptFocus.checkWindowUnfocused();
-    },
-    
-    // STANDARD MODE: Accept polling (Cursor + Antigravity foreground)
-    acceptPoll: function() {
-        if (!window.__autoAcceptCore || !window.__autoAcceptPolling) {
-            return { clicked: false, count: 0, error: 'Scripts not loaded: Core=' + !!window.__autoAcceptCore + ' Polling=' + !!window.__autoAcceptPolling };
-        }
-        try {
-            const ide = window.__autoAcceptCore.detectIDE();
-            return window.__autoAcceptPolling.acceptPoll(ide);
-        } catch(e) {
-            return { clicked: false, count: 0, error: e.message };
-        }
-    },
-    
-    // CURSOR BACKGROUND: Accept with relaxed visibility
-    cursorBackgroundPoll: function() {
-        if (!window.__autoAcceptCore || !window.__autoAcceptPolling) {
-            return { clicked: false, count: 0, error: 'Scripts not loaded' };
-        }
-        try {
-            const ide = window.__autoAcceptCore.detectIDE();
-            return window.__autoAcceptPolling.cursorBackgroundPoll(ide);
-        } catch(e) {
-            return { clicked: false, count: 0, error: e.message };
-        }
-    },
-    
-    // ANTIGRAVITY BACKGROUND: Accept + NewChat + Tab cycling
-    antigravityBackgroundPoll: async function(tabIndex, isPro = false) {
-        if (!window.__autoAcceptCore || !window.__autoAcceptPolling) {
-            return { clicked: false, count: 0, error: 'Scripts not loaded' };
-        }
-        try {
-            const ide = window.__autoAcceptCore.detectIDE();
-            return await window.__autoAcceptPolling.antigravityBackgroundPoll(ide, tabIndex, isPro);
-        } catch(e) {
-            return { clicked: false, count: 0, error: e.message };
-        }
-    },
-    
-    // Hide background mode overlay
-    hideBackgroundOverlay: function() {
-        if (window.__autoAcceptPolling && window.__autoAcceptPolling.hideBackgroundOverlay) {
-            window.__autoAcceptPolling.hideBackgroundOverlay();
-            return { success: true };
-        }
-        return { success: false, error: 'Overlay function not found' };
-    },
-    
-    // Diagnostics
-    getDiagnostics: function() {
-        const result = {
-            coreLoaded: !!window.__autoAcceptCore,
-            focusLoaded: !!window.__autoAcceptFocus,
-            pollingLoaded: !!window.__autoAcceptPolling,
-            scriptErrors: __scriptErrors,
-            windowFocused: document.hasFocus()
-        };
-        
-        if (window.__autoAcceptCore) {
-            try {
-                const ide = window.__autoAcceptCore.detectIDE();
-                const doc = window.__autoAcceptCore.getDocument(ide);
-                result.ide = ide.name;
-                result.isAntigravity = ide.isAntigravity;
-                result.isCursor = ide.isCursor;
-                result.acceptButtons = window.__autoAcceptCore.findAcceptButtons(doc, false).length;
-                result.state = window.__autoAcceptCore.state;
-            } catch(e) {
-                result.error = e.message;
-            }
-        }
-        
-        return result;
-    }
-};
-
-// Log final initialization status
-if (__scriptErrors.length > 0) {
-    console.error('[AutoAccept] Script loading errors:', __scriptErrors);
-} else if (window.__autoAcceptCore) {
-    window.__autoAcceptCore.log('CDP script loaded. IDE:', window.__autoAcceptCore.detectIDE().name);
-} else {
-    console.error('[AutoAccept] Core failed to load!');
-}
-`;
-      combined += "\n})();\n";
-      return combined;
-    }
-    var INJECTION_SCRIPT = loadScripts();
     var CDPHandler = class {
-      constructor(startPort = CDP_PORT_START, endPort = CDP_PORT_END, logger = null) {
-        this.name = "CDPHandler";
+      constructor(startPort = 9222, endPort = 9232, logger = console.log) {
+        this.startPort = startPort;
+        this.endPort = endPort;
+        this.logger = logger;
         this.connections = /* @__PURE__ */ new Map();
         this.messageId = 1;
         this.pendingMessages = /* @__PURE__ */ new Map();
-        this.reconnectTimer = null;
         this.isEnabled = false;
-        this.startPort = startPort;
-        this.endPort = endPort;
-        this.logger = logger || console.log;
         this.isPro = false;
-        this.tabIndex = 0;
+        this.logFilePath = null;
       }
-      // ========================================
-      // LOGGING
-      // ========================================
+      setLogFile(filePath) {
+        this.logFilePath = filePath;
+        if (filePath) {
+          fs.writeFileSync(filePath, `[${(/* @__PURE__ */ new Date()).toISOString()}] CDP Log Initialized
+`);
+        }
+      }
       log(...args) {
-        const message = args.map((a) => typeof a === "object" ? JSON.stringify(a) : a).join(" ");
-        if (this.logger) {
-          this.logger(`${LOG_PREFIX} ${message}`);
+        const msg = `${LOG_PREFIX} ${args.join(" ")}`;
+        if (this.logger) this.logger(msg);
+        if (this.logFilePath) {
+          try {
+            fs.appendFileSync(this.logFilePath, `[${(/* @__PURE__ */ new Date()).toISOString()}] ${msg}
+`);
+          } catch (e) {
+          }
         }
       }
       setProStatus(isPro2) {
         this.isPro = isPro2;
-        this.log(`Pro status set to ${isPro2}`);
       }
-      // ========================================
-      // INSTANCE DISCOVERY
-      // ========================================
+      async isCDPAvailable() {
+        const instances = await this.scanForInstances();
+        return instances.length > 0;
+      }
       async scanForInstances() {
         const instances = [];
         for (let port = this.startPort; port <= this.endPort; port++) {
           try {
             const pages = await this.getPages(port);
-            if (pages && pages.length > 0) {
-              this.log(`Found ${pages.length} pages on port ${port}`);
-              instances.push({ port, pages });
-            }
+            if (pages.length > 0) instances.push({ port, pages });
           } catch (e) {
-            if (!e.message.includes("ECONNREFUSED")) {
-              this.log(`Scan port ${port} failed: ${e.message}`);
-            }
           }
         }
         return instances;
       }
-      async getPages(port) {
+      getPages(port) {
         return new Promise((resolve, reject) => {
-          const req = http.get({
-            hostname: "127.0.0.1",
-            port,
-            path: "/json/list",
-            timeout: 1e3
-          }, (res) => {
+          const req = http.get({ hostname: "127.0.0.1", port, path: "/json/list", timeout: 1e3 }, (res) => {
             let data = "";
             res.on("data", (chunk) => data += chunk);
             res.on("end", () => {
               try {
-                const pages = JSON.parse(data);
-                resolve(pages.filter((p) => p.webSocketDebuggerUrl));
+                resolve(JSON.parse(data).filter((p) => p.webSocketDebuggerUrl));
               } catch (e) {
                 reject(e);
               }
@@ -4321,117 +4128,106 @@ if (__scriptErrors.length > 0) {
           req.on("error", reject);
           req.on("timeout", () => {
             req.destroy();
-            reject(new Error("Timeout"));
+            reject(new Error("timeout"));
           });
         });
       }
-      async isCDPAvailable() {
-        const instances = await this.scanForInstances();
-        return instances.length > 0;
-      }
-      // ========================================
-      // CONNECTION MANAGEMENT
-      // ========================================
-      async start() {
+      async start(config) {
         this.isEnabled = true;
-        const connected = await this.discoverAndConnect();
-        if (!this.reconnectTimer) {
-          this.reconnectTimer = setInterval(() => {
-            if (this.isEnabled) {
-              this.discoverAndConnect().catch(() => {
-              });
+        const instances = await this.scanForInstances();
+        for (const instance of instances) {
+          for (const page of instance.pages) {
+            if (!this.connections.has(page.id)) {
+              await this.connectToPage(page);
             }
-          }, 1e4);
+            if (this.connections.has(page.id)) {
+              await this.injectAndStart(page.id, config);
+            }
+          }
         }
-        return connected;
       }
       async stop() {
         this.isEnabled = false;
-        if (this.reconnectTimer) {
-          clearInterval(this.reconnectTimer);
-          this.reconnectTimer = null;
+        for (const [pageId] of this.connections) {
+          try {
+            await this.sendCommand(pageId, "Runtime.evaluate", {
+              expression: 'if(typeof window !== "undefined" && window.__autoAcceptStop) window.__autoAcceptStop()'
+            });
+          } catch (e) {
+          }
         }
         this.disconnectAll();
       }
-      async discoverAndConnect() {
-        const instances = await this.scanForInstances();
-        let connected = 0;
-        for (const instance of instances) {
-          if (!this.isPro && this.connections.size >= 1) {
-            this.log("Non-Pro limit reached (1 instance)");
-            break;
-          }
-          for (const page of instance.pages) {
-            if (!this.connections.has(page.id)) {
-              if (!this.isPro && this.connections.size >= 1) break;
-              const success = await this.connectToPage(page);
-              if (success) connected++;
-            }
-          }
-        }
-        return connected > 0 || this.connections.size > 0;
-      }
       async connectToPage(page) {
         return new Promise((resolve) => {
-          try {
-            const ws = new WebSocket(page.webSocketDebuggerUrl);
-            let resolved = false;
-            ws.on("open", async () => {
-              this.log(`Connected to page ${page.id}`);
-              this.connections.set(page.id, { ws, injected: false });
-              try {
-                await this.injectScript(page.id);
-              } catch (e) {
+          const ws = new WebSocket(page.webSocketDebuggerUrl);
+          ws.on("open", () => {
+            this.connections.set(page.id, { ws, injected: false });
+            resolve(true);
+          });
+          ws.on("message", (data) => {
+            try {
+              const msg = JSON.parse(data.toString());
+              if (msg.id && this.pendingMessages.has(msg.id)) {
+                const { resolve: res, reject: rej } = this.pendingMessages.get(msg.id);
+                this.pendingMessages.delete(msg.id);
+                msg.error ? rej(new Error(msg.error.message)) : res(msg.result);
               }
-              if (!resolved) {
-                resolved = true;
-                resolve(true);
-              }
-            });
-            ws.on("message", (data) => {
-              try {
-                const msg = JSON.parse(data.toString());
-                if (msg.id && this.pendingMessages.has(msg.id)) {
-                  const { resolve: resolve2, reject } = this.pendingMessages.get(msg.id);
-                  this.pendingMessages.delete(msg.id);
-                  msg.error ? reject(new Error(msg.error.message)) : resolve2(msg.result);
-                }
-              } catch (e) {
-              }
-            });
-            ws.on("error", () => {
-              this.connections.delete(page.id);
-              if (!resolved) {
-                resolved = true;
-                resolve(false);
-              }
-            });
-            ws.on("close", () => {
-              this.connections.delete(page.id);
-              if (!resolved) {
-                resolved = true;
-                resolve(false);
-              }
-            });
-            setTimeout(() => {
-              if (!resolved) {
-                resolved = true;
-                resolve(false);
-              }
-            }, 5e3);
-          } catch (e) {
+            } catch (e) {
+            }
+          });
+          ws.on("error", (err) => {
+            this.log(`WS Error on ${page.id}: ${err.message}`);
+            this.connections.delete(page.id);
             resolve(false);
-          }
+          });
+          ws.on("close", () => {
+            this.connections.delete(page.id);
+          });
         });
       }
-      // ========================================
-      // CDP COMMAND SENDING
-      // ========================================
-      async sendCommand(pageId, method, params = {}, timeout = 5e3) {
+      async injectAndStart(pageId, config) {
         const conn = this.connections.get(pageId);
-        if (!conn || conn.ws.readyState !== WebSocket.OPEN) {
-          throw new Error("Not connected");
+        if (!conn) return;
+        try {
+          if (!conn.injected) {
+            const script = this.getComposedScript();
+            const result = await this.sendCommand(pageId, "Runtime.evaluate", {
+              expression: script,
+              userGesture: true,
+              awaitPromise: true
+            });
+            if (result.exceptionDetails) {
+              this.log(`Injection Exception on ${pageId}: ${result.exceptionDetails.text} ${result.exceptionDetails.exception.description}`);
+            } else {
+              conn.injected = true;
+              this.log(`Injected core onto ${pageId}`);
+            }
+          }
+          if (conn.injected) {
+            const res = await this.sendCommand(pageId, "Runtime.evaluate", {
+              expression: `(function(){
+                        const g = (typeof window !== 'undefined') ? window : (typeof globalThis !== 'undefined' ? globalThis : self);
+                        if(g && typeof g.__autoAcceptStart === 'function'){
+                            g.__autoAcceptStart(${JSON.stringify(config)});
+                            return "started";
+                        }
+                        return "not_found";
+                    })()`
+            });
+            this.log(`Start signal on ${pageId}: ${JSON.stringify(res.result?.value || res)}`);
+          }
+        } catch (e) {
+          this.log(`Failed to start/update on ${pageId}: ${e.message}`);
         }
+      }
+      getComposedScript() {
+        const scriptPath = path2.join(__dirname, "..", "main_scripts", "full_cdp_script.js");
+        return fs.readFileSync(scriptPath, "utf8");
+      }
+      sendCommand(pageId, method, params = {}) {
+        const conn = this.connections.get(pageId);
+        if (!conn || conn.ws.readyState !== WebSocket.OPEN) return Promise.reject("dead");
         const id = this.messageId++;
         return new Promise((resolve, reject) => {
           this.pendingMessages.set(id, { resolve, reject });
@@ -4439,262 +4235,28 @@ if (__scriptErrors.length > 0) {
           setTimeout(() => {
             if (this.pendingMessages.has(id)) {
               this.pendingMessages.delete(id);
-              reject(new Error("Timeout"));
+              reject(new Error("timeout"));
             }
-          }, timeout);
+          }, 1e4);
         });
       }
-      async injectScript(pageId) {
-        await this.sendCommand(pageId, "Runtime.evaluate", {
-          expression: INJECTION_SCRIPT,
-          returnByValue: true
-        });
-        const conn = this.connections.get(pageId);
-        if (conn) conn.injected = true;
-        this.log(`Script injected into page ${pageId}`);
-      }
-      // ========================================
-      // MAIN ROUTING LOGIC
-      // ========================================
-      /**
-       * Execute accept action with proper routing.
-       * 
-       * ROUTING:
-       *   Antigravity + background + Pro → antigravityBackgroundPoll()
-       *   Antigravity + foreground      → acceptPoll()
-       *   Cursor + background + Pro     → cursorBackgroundPoll()
-       *   Cursor + foreground           → acceptPoll()
-       * 
-       * @param {boolean} allowBackground - If true, enable background mode (Pro only)
-       */
-      async executeAccept(allowBackground = false, forceWindowFocused = null) {
-        let totalClicked = 0;
-        this.log("========================================");
-        this.log(`executeAccept START`);
-        this.log(`  allowBackground=${allowBackground} | isPro=${this.isPro} | forceWindowFocused=${forceWindowFocused}`);
-        this.log(`  connections=${this.connections.size}`);
-        this.log("========================================");
-        for (const [pageId, conn] of this.connections) {
-          this.log(`[Page ${pageId}] ws.readyState=${conn.ws.readyState} (OPEN=${WebSocket.OPEN})`);
-          if (conn.ws.readyState !== WebSocket.OPEN) {
-            continue;
-          }
-          try {
-            const contextCheck = await this.sendCommand(pageId, "Runtime.evaluate", {
-              expression: `(typeof window !== 'undefined' && typeof document !== 'undefined')`,
-              returnByValue: true
-            });
-            const isValidContext = contextCheck?.result?.value === true;
-            if (!isValidContext) {
-              continue;
-            }
-            if (!conn.injected) {
-              this.log(`[Page ${pageId}] Injecting script...`);
-              await this.injectScript(pageId);
-            }
-            const cdpCheck = await this.sendCommand(pageId, "Runtime.evaluate", {
-              expression: `JSON.stringify({
-                        hasCDP: typeof window.__autoAcceptCDP !== 'undefined',
-                        hasCore: typeof window.__autoAcceptCore !== 'undefined',
-                        hasFocus: typeof window.__autoAcceptFocus !== 'undefined',
-                        hasPolling: typeof window.__autoAcceptPolling !== 'undefined',
-                        docTitle: document.title,
-                        url: window.location.href,
-                        hasAntigravityPanel: !!document.getElementById('antigravity.agentPanel'),
-                        hasAntigravityClass: !!document.querySelector('[class*="antigravity"]'),
-                        titleIncludesAntigravity: document.title.includes('Antigravity'),
-                        titleLower: document.title.toLowerCase(),
-                        bodyClasses: document.body ? document.body.className : 'no-body'
-                    })`,
-              returnByValue: true
-            });
-            const diagValue = cdpCheck?.result?.value;
-            this.log(`[Page ${pageId}] DIAGNOSTIC: ${diagValue}`);
-            let diag = {};
-            try {
-              diag = JSON.parse(diagValue || "{}");
-            } catch (e) {
-            }
-            if (!diag.hasCDP) {
-              this.log(`[Page ${pageId}] WARNING: __autoAcceptCDP not found, scripts may not have loaded`);
-            }
-            const ideResult = await this.sendCommand(pageId, "Runtime.evaluate", {
-              expression: "window.__autoAcceptCDP ? JSON.stringify(window.__autoAcceptCDP.getIDE()) : null",
-              returnByValue: true
-            });
-            this.log(`[Page ${pageId}] Raw IDE Result: ${ideResult?.result?.value}`);
-            let ide = { name: "Unknown", isAntigravity: false, isCursor: false };
-            try {
-              if (ideResult?.result?.value) {
-                ide = JSON.parse(ideResult.result.value);
-              }
-            } catch (e) {
-              this.log(`[Page ${pageId}] Failed to parse IDE result: ${e.message}`);
-            }
-            if (!ide.isAntigravity && diag.titleIncludesAntigravity) {
-              this.log(`[Page ${pageId}] FALLBACK: Using diagnostic titleIncludesAntigravity=true`);
-              ide.isAntigravity = true;
-              ide.name = "Antigravity";
-            }
-            const focusResult = await this.sendCommand(pageId, "Runtime.evaluate", {
-              expression: `JSON.stringify({
-                        hasFocus: document.hasFocus(),
-                        visibilityState: document.visibilityState,
-                        hidden: document.hidden,
-                        autoAcceptFocus: window.__autoAcceptFocus ? window.__autoAcceptFocus.isWindowFocused() : 'N/A'
-                    })`,
-              returnByValue: true
-            });
-            this.log(`[Page ${pageId}] Raw Focus Result: ${focusResult?.result?.value}`);
-            let focusData = {};
-            try {
-              focusData = JSON.parse(focusResult?.result?.value || "{}");
-            } catch (e) {
-            }
-            const windowFocused = forceWindowFocused !== null ? forceWindowFocused : focusData.autoAcceptFocus !== "N/A" && typeof focusData.autoAcceptFocus === "boolean" ? focusData.autoAcceptFocus : focusData.hasFocus ?? true;
-            this.log(`[Page ${pageId}] IDE: ${ide.name} | isAntigravity: ${ide.isAntigravity}`);
-            this.log(`[Page ${pageId}] WindowFocused: ${windowFocused} | docHasFocus: ${focusData.hasFocus} | hidden: ${focusData.hidden}`);
-            this.log(`[Page ${pageId}] ROUTING FACTORS:`);
-            this.log(`  - allowBackground: ${allowBackground}`);
-            this.log(`  - isPro: ${this.isPro}`);
-            this.log(`  - ide.isAntigravity: ${ide.isAntigravity}`);
-            const useBackground = allowBackground && this.isPro;
-            this.log(`  - useBackground: ${useBackground}`);
-            let expression;
-            let mode;
-            if (ide.isAntigravity) {
-              if (useBackground) {
-                mode = "antigravity_background";
-                expression = `window.__autoAcceptCDP.antigravityBackgroundPoll(${this.tabIndex}, ${this.isPro})`;
-                this.tabIndex = (this.tabIndex + 1) % 1e3;
-              } else {
-                mode = "accept_poll";
-                expression = "window.__autoAcceptCDP.acceptPoll()";
-              }
-            } else {
-              if (useBackground) {
-                mode = "cursor_background";
-                expression = "window.__autoAcceptCDP.cursorBackgroundPoll()";
-              } else {
-                mode = "accept_poll";
-                expression = "window.__autoAcceptCDP.acceptPoll()";
-              }
-            }
-            this.log(`[Page ${pageId}] ROUTING \u2192 ${mode}`);
-            this.log(`[Page ${pageId}] Expression: ${expression}`);
-            const result = await this.sendCommand(pageId, "Runtime.evaluate", {
-              expression,
-              returnByValue: true,
-              awaitPromise: mode === "antigravity_background"
-              // Only AG background is async
-            }, mode === "antigravity_background" ? 2e4 : 5e3);
-            const pollResult = result?.result?.value || {};
-            this.log(`[Page ${pageId}] Poll Result:`, pollResult);
-            if (pollResult.clicked) {
-              totalClicked++;
-              this.log(`[Page ${pageId}] \u2713 Button clicked!`);
-            }
-          } catch (e) {
-            this.log(`[Page ${pageId}] ERROR: ${e.message}`);
-            this.log(`[Page ${pageId}] Stack: ${e.stack}`);
-          }
-        }
-        this.log("========================================");
-        this.log(`executeAccept END | totalClicked=${totalClicked}`);
-        this.log("========================================");
-        return { executed: totalClicked };
-      }
-      // ========================================
-      // OVERLAY CONTROL
-      // ========================================
       async hideBackgroundOverlay() {
-        this.log("Hiding background overlay on all pages...");
-        for (const [pageId, conn] of this.connections) {
-          if (conn.ws.readyState !== WebSocket.OPEN) continue;
+        for (const [pageId] of this.connections) {
           try {
             await this.sendCommand(pageId, "Runtime.evaluate", {
-              expression: "if (window.__autoAcceptCDP) window.__autoAcceptCDP.hideBackgroundOverlay()",
-              returnByValue: true
-            });
-            await this.sendCommand(pageId, "Runtime.evaluate", {
-              expression: `(function(){
-                        // 1. Antigravity Overlay Removal
-                        const overlays = document.querySelectorAll('#__autoAcceptBgOverlay');
-                        overlays.forEach(el => el.remove());
-                        const s = document.getElementById('__autoAcceptBgStyles');
-                        if(s) s.remove();
-
-                        // 2. Cursor Overlay Removal
-                        const cOverlays = document.querySelectorAll('#__cursorBgOverlay');
-                        cOverlays.forEach(el => el.remove());
-                        const cs = document.getElementById('__cursorBgStyles');
-                        if(cs) cs.remove();
-
-                        // 3. Direct State Cleanup (if script accessible)
-                        if (window.__autoAcceptPolling) {
-                            if (typeof window.__autoAcceptPolling.hideCursorBackgroundOverlay === 'function') {
-                                window.__autoAcceptPolling.hideCursorBackgroundOverlay();
-                            }
-                            if (typeof window.__autoAcceptPolling.hideBackgroundOverlay === 'function') {
-                                window.__autoAcceptPolling.hideBackgroundOverlay();
-                            }
-                        }
-                    })()`,
-              returnByValue: true
+              expression: 'if(typeof window !== "undefined" && typeof hideOverlay === "function") hideOverlay()'
             });
           } catch (e) {
           }
         }
-      }
-      // ========================================
-      // UTILITY METHODS
-      // ========================================
-      async getWindowFocusState() {
-        for (const [pageId, conn] of this.connections) {
-          if (conn.ws.readyState !== WebSocket.OPEN) continue;
-          try {
-            if (!conn.injected) await this.injectScript(pageId);
-            const result = await this.sendCommand(pageId, "Runtime.evaluate", {
-              expression: "window.__autoAcceptCDP.isWindowFocused()",
-              returnByValue: true
-            });
-            if (result?.result?.value === true) return true;
-          } catch (e) {
-            this.log(`Focus check failed: ${e.message}`);
-          }
-        }
-        return false;
-      }
-      async getStuckState(autoAcceptEnabled) {
-        for (const [pageId, conn] of this.connections) {
-          if (conn.ws.readyState !== WebSocket.OPEN) continue;
-          try {
-            if (!conn.injected) await this.injectScript(pageId);
-            const result = await this.sendCommand(pageId, "Runtime.evaluate", {
-              expression: `window.__autoAcceptCDP.getDiagnostics()`,
-              returnByValue: true
-            });
-            const data = result?.result?.value;
-            if (data && autoAcceptEnabled) {
-              const elapsed = Date.now() - (data.state?.lastActionTime || Date.now());
-              if (elapsed > 3e4 && data.state?.sessionHasAccepted) {
-                return { state: "stalled", elapsed };
-              }
-            }
-          } catch (e) {
-          }
-        }
-        return { state: "running" };
       }
       getConnectionCount() {
         return this.connections.size;
       }
       disconnectAll() {
-        for (const [, conn] of this.connections) {
-          try {
-            conn.ws.close();
-          } catch (e) {
-          }
+        for (const [, conn] of this.connections) try {
+          conn.ws.close();
+        } catch (e) {
         }
         this.connections.clear();
       }
@@ -4711,14 +4273,14 @@ var require_relauncher = __commonJS({
     var os = require("os");
     var http = require("http");
     var fs = require("fs");
-    var path = require("path");
+    var path2 = require("path");
     var BASE_CDP_PORT = 9222;
     var CDP_FLAG = `--remote-debugging-port=${BASE_CDP_PORT}`;
     var Relauncher = class {
       constructor(logger = null) {
         this.platform = os.platform();
         this.logger = logger || console.log;
-        this.logFile = path.join(os.tmpdir(), "auto_accept_relaunch.log");
+        this.logFile = path2.join(os.tmpdir(), "auto_accept_relaunch.log");
       }
       log(msg) {
         try {
@@ -4741,10 +4303,7 @@ var require_relauncher = __commonJS({
         }
         this.log(msg);
       }
-      // ==================== STEP 1: CDP CHECK ====================
-      /**
-       * Check if CDP is available on a port
-       */
+      // check if cdp is already running
       async isCDPRunning(port = BASE_CDP_PORT) {
         return new Promise((resolve) => {
           const req = http.get(`http://127.0.0.1:${port}/json/version`, (res) => {
@@ -4757,24 +4316,14 @@ var require_relauncher = __commonJS({
           });
         });
       }
-      // ==================== STEP 2: FIND SHORTCUTS ====================
-      /**
-       * Detect the current IDE name from vscode.env
-       */
+      // find shortcut for this ide
+      // handles windows mac and linux
       getIDEName() {
-        try {
-          const appName = vscode2.env.appName || "";
-          if (appName.toLowerCase().includes("cursor")) return "Cursor";
-          if (appName.toLowerCase().includes("antigravity")) return "Antigravity";
-          return "Code";
-        } catch (e) {
-          return "Cursor";
-        }
+        const appName = vscode2.env.appName || "";
+        if (appName.toLowerCase().includes("cursor")) return "Cursor";
+        if (appName.toLowerCase().includes("antigravity")) return "Antigravity";
+        return "Code";
       }
-      /**
-       * Find all shortcuts for the current IDE
-       * Returns array of { path, hasFlag, type }
-       */
       async findIDEShortcuts() {
         const ideName = this.getIDEName();
         this.log(`Finding shortcuts for: ${ideName}`);
@@ -4790,11 +4339,11 @@ var require_relauncher = __commonJS({
         const shortcuts = [];
         const possiblePaths = [
           // Start Menu (most reliable)
-          path.join(process.env.APPDATA || "", "Microsoft", "Windows", "Start Menu", "Programs", ideName, `${ideName}.lnk`),
+          path2.join(process.env.APPDATA || "", "Microsoft", "Windows", "Start Menu", "Programs", ideName, `${ideName}.lnk`),
           // Desktop
-          path.join(process.env.USERPROFILE || "", "Desktop", `${ideName}.lnk`),
+          path2.join(process.env.USERPROFILE || "", "Desktop", `${ideName}.lnk`),
           // Taskbar (Windows 10+)
-          path.join(process.env.APPDATA || "", "Microsoft", "Internet Explorer", "Quick Launch", "User Pinned", "TaskBar", `${ideName}.lnk`)
+          path2.join(process.env.APPDATA || "", "Microsoft", "Internet Explorer", "Quick Launch", "User Pinned", "TaskBar", `${ideName}.lnk`)
         ];
         for (const shortcutPath of possiblePaths) {
           if (fs.existsSync(shortcutPath)) {
@@ -4812,19 +4361,30 @@ var require_relauncher = __commonJS({
         return shortcuts;
       }
       async _readWindowsShortcut(shortcutPath) {
+        const scriptPath = path2.join(os.tmpdir(), "auto_accept_read_shortcut.ps1");
         try {
-          const psCommand = `
-                $ErrorActionPreference = "Stop"
-                $shell = New-Object -ComObject WScript.Shell
-                $shortcut = $shell.CreateShortcut('${shortcutPath.replace(/'/g, "''")}')
-                Write-Output "ARGS:$($shortcut.Arguments)"
-                Write-Output "TARGET:$($shortcut.TargetPath)"
-            `.trim().replace(/\n/g, "; ");
-          const result = execSync(`powershell -Command "${psCommand}"`, {
+          const psScript = `
+$ErrorActionPreference = "Stop"
+try {
+    $shell = New-Object -ComObject WScript.Shell
+    $shortcut = $shell.CreateShortcut('${shortcutPath.replace(/'/g, "''")}')
+    Write-Output "ARGS:$($shortcut.Arguments)"
+    Write-Output "TARGET:$($shortcut.TargetPath)"
+} catch {
+    Write-Output "ERROR:$($_.Exception.Message)"
+}
+`;
+          fs.writeFileSync(scriptPath, psScript, "utf8");
+          const result = execSync(`powershell -ExecutionPolicy Bypass -File "${scriptPath}"`, {
             encoding: "utf8",
-            timeout: 5e3
+            timeout: 1e4
           });
-          const lines = result.split("\n").map((l) => l.trim());
+          const lines = result.split("\n").map((l) => l.trim()).filter((l) => l);
+          const errorLine = lines.find((l) => l.startsWith("ERROR:"));
+          if (errorLine) {
+            this.log(`Error reading shortcut: ${errorLine.substring(6)}`);
+            return { args: "", target: "", hasFlag: false };
+          }
           const argsLine = lines.find((l) => l.startsWith("ARGS:")) || "ARGS:";
           const targetLine = lines.find((l) => l.startsWith("TARGET:")) || "TARGET:";
           const args = argsLine.substring(5);
@@ -4835,11 +4395,16 @@ var require_relauncher = __commonJS({
         } catch (e) {
           this.log(`Error reading shortcut ${shortcutPath}: ${e.message}`);
           return { args: "", target: "", hasFlag: false };
+        } finally {
+          try {
+            fs.unlinkSync(scriptPath);
+          } catch (e) {
+          }
         }
       }
       async _findMacOSShortcuts(ideName) {
         const shortcuts = [];
-        const wrapperPath = path.join(os.homedir(), ".local", "bin", `${ideName.toLowerCase()}-cdp`);
+        const wrapperPath = path2.join(os.homedir(), ".local", "bin", `${ideName.toLowerCase()}-cdp`);
         if (fs.existsSync(wrapperPath)) {
           const content = fs.readFileSync(wrapperPath, "utf8");
           shortcuts.push({
@@ -4863,7 +4428,7 @@ var require_relauncher = __commonJS({
       async _findLinuxShortcuts(ideName) {
         const shortcuts = [];
         const desktopLocations = [
-          path.join(os.homedir(), ".local", "share", "applications", `${ideName.toLowerCase()}.desktop`),
+          path2.join(os.homedir(), ".local", "share", "applications", `${ideName.toLowerCase()}.desktop`),
           `/usr/share/applications/${ideName.toLowerCase()}.desktop`
         ];
         for (const desktopPath of desktopLocations) {
@@ -4882,11 +4447,7 @@ var require_relauncher = __commonJS({
         this.log(`Found ${shortcuts.length} Linux .desktop files`);
         return shortcuts;
       }
-      // ==================== STEP 3: MODIFY SHORTCUTS ====================
-      /**
-       * Ensure the shortcut has the CDP flag
-       * Returns { success, modified, message }
-       */
+      // add flag to shortcut if absent
       async ensureShortcutHasFlag(shortcut) {
         if (shortcut.hasFlag) {
           return { success: true, modified: false, message: "Already has CDP flag" };
@@ -4900,27 +4461,51 @@ var require_relauncher = __commonJS({
         }
       }
       async _modifyWindowsShortcut(shortcutPath) {
+        const scriptPath = path2.join(os.tmpdir(), "auto_accept_modify_shortcut.ps1");
         try {
-          const psCommand = `
-                $ErrorActionPreference = "Stop"
-                $shell = New-Object -ComObject WScript.Shell
-                $shortcut = $shell.CreateShortcut('${shortcutPath.replace(/'/g, "''")}')
-                if ($shortcut.Arguments -notlike '*--remote-debugging-port*') {
-                    $shortcut.Arguments = '--remote-debugging-port=9222 ' + $shortcut.Arguments
-                    $shortcut.Save()
-                    Write-Output "MODIFIED"
-                } else {
-                    Write-Output "ALREADY_SET"
-                }
-            `.trim().replace(/\n/g, "; ");
-          const result = execSync(`powershell -Command "${psCommand}"`, {
+          const psScript = `
+$ErrorActionPreference = "Stop"
+try {
+    $shell = New-Object -ComObject WScript.Shell
+    $shortcut = $shell.CreateShortcut('${shortcutPath.replace(/'/g, "''")}')
+    
+    Write-Output "BEFORE_ARGS:$($shortcut.Arguments)"
+    Write-Output "TARGET:$($shortcut.TargetPath)"
+    
+    if ($shortcut.Arguments -notlike '*--remote-debugging-port*') {
+        $shortcut.Arguments = '--remote-debugging-port=${BASE_CDP_PORT} ' + $shortcut.Arguments
+        $shortcut.Save()
+        Write-Output "AFTER_ARGS:$($shortcut.Arguments)"
+        Write-Output "RESULT:MODIFIED"
+    } else {
+        Write-Output "RESULT:ALREADY_SET"
+    }
+} catch {
+    Write-Output "ERROR:$($_.Exception.Message)"
+}
+`;
+          fs.writeFileSync(scriptPath, psScript, "utf8");
+          this.log(`DEBUG: Wrote modify script to ${scriptPath}`);
+          const rawResult = execSync(`powershell -ExecutionPolicy Bypass -File "${scriptPath}"`, {
             encoding: "utf8",
-            timeout: 5e3
-          }).trim();
-          if (result.includes("MODIFIED")) {
+            timeout: 1e4
+          });
+          this.log(`DEBUG: Raw PowerShell output: ${JSON.stringify(rawResult)}`);
+          const lines = rawResult.split("\n").map((l) => l.trim()).filter((l) => l);
+          this.log(`DEBUG: Parsed lines: ${JSON.stringify(lines)}`);
+          const errorLine = lines.find((l) => l.startsWith("ERROR:"));
+          if (errorLine) {
+            const errorMsg = errorLine.substring(6);
+            this.log(`PowerShell error: ${errorMsg}`);
+            return { success: false, modified: false, message: errorMsg };
+          }
+          const resultLine = lines.find((l) => l.startsWith("RESULT:"));
+          const result = resultLine ? resultLine.substring(7) : "UNKNOWN";
+          this.log(`DEBUG: Result extracted: "${result}"`);
+          if (result === "MODIFIED") {
             this.log(`Modified shortcut: ${shortcutPath}`);
-            return { success: true, modified: true, message: `Modified: ${path.basename(shortcutPath)}` };
-          } else if (result.includes("ALREADY_SET")) {
+            return { success: true, modified: true, message: `Modified: ${path2.basename(shortcutPath)}` };
+          } else if (result === "ALREADY_SET") {
             this.log(`Shortcut already has CDP flag`);
             return { success: true, modified: false, message: "Already configured" };
           } else {
@@ -4929,23 +4514,29 @@ var require_relauncher = __commonJS({
           }
         } catch (e) {
           this.log(`Error modifying shortcut: ${e.message}`);
+          if (e.stderr) this.log(`STDERR: ${e.stderr}`);
           return { success: false, modified: false, message: e.message };
+        } finally {
+          try {
+            fs.unlinkSync(scriptPath);
+          } catch (e) {
+          }
         }
       }
       async _createMacOSWrapper() {
         const ideName = this.getIDEName();
-        const wrapperDir = path.join(os.homedir(), ".local", "bin");
-        const wrapperPath = path.join(wrapperDir, `${ideName.toLowerCase()}-cdp`);
+        const wrapperDir = path2.join(os.homedir(), ".local", "bin");
+        const wrapperPath = path2.join(wrapperDir, `${ideName.toLowerCase()}-cdp`);
         try {
           fs.mkdirSync(wrapperDir, { recursive: true });
           const appBundle = `/Applications/${ideName}.app`;
           const possibleBinaries = [
             // Standard macOS app binary location
-            path.join(appBundle, "Contents", "MacOS", ideName),
+            path2.join(appBundle, "Contents", "MacOS", ideName),
             // Electron app binary location (e.g., VS Code, Cursor)
-            path.join(appBundle, "Contents", "Resources", "app", "bin", ideName.toLowerCase()),
+            path2.join(appBundle, "Contents", "Resources", "app", "bin", ideName.toLowerCase()),
             // Some apps use 'Electron' as the binary name
-            path.join(appBundle, "Contents", "MacOS", "Electron")
+            path2.join(appBundle, "Contents", "MacOS", "Electron")
           ];
           let binaryPath = null;
           for (const binPath of possibleBinaries) {
@@ -4995,29 +4586,24 @@ open -a "${appBundle}" --args ${CDP_FLAG} "$@"
             /^(Exec=)(.*)$/m,
             `$1$2 ${CDP_FLAG}`
           );
-          const userDesktopDir = path.join(os.homedir(), ".local", "share", "applications");
-          const targetPath = desktopPath.includes(".local") ? desktopPath : path.join(userDesktopDir, path.basename(desktopPath));
+          const userDesktopDir = path2.join(os.homedir(), ".local", "share", "applications");
+          const targetPath = desktopPath.includes(".local") ? desktopPath : path2.join(userDesktopDir, path2.basename(desktopPath));
           fs.mkdirSync(userDesktopDir, { recursive: true });
           fs.writeFileSync(targetPath, content);
           this.log(`Modified Linux .desktop: ${targetPath}`);
-          return { success: true, modified: true, message: `Modified: ${path.basename(targetPath)}` };
+          return { success: true, modified: true, message: `Modified: ${path2.basename(targetPath)}` };
         } catch (e) {
           this.log(`Error modifying .desktop: ${e.message}`);
           return { success: false, modified: false, message: e.message };
         }
       }
-      // ==================== STEP 4: RELAUNCH ====================
-      /**
-       * Get current workspace folders as command line arguments
-       */
+      // get current workspace to relaunch the same workspace
       getWorkspaceFolders() {
         const folders = vscode2.workspace.workspaceFolders;
         if (!folders || folders.length === 0) return [];
         return folders.map((f) => f.uri.fsPath);
       }
-      /**
-       * Relaunch the IDE via the modified shortcut
-       */
+      // relaunch ide via the new shortcut
       async relaunchViaShortcut(shortcut) {
         const workspaceFolders = this.getWorkspaceFolders();
         fs.writeFileSync(this.logFile, `=== Relaunch started at ${(/* @__PURE__ */ new Date()).toISOString()} ===
@@ -5034,26 +4620,47 @@ open -a "${appBundle}" --args ${CDP_FLAG} "$@"
       }
       async _relaunchWindows(shortcut, workspaceFolders) {
         const folderArgs = workspaceFolders.map((f) => `"${f}"`).join(" ");
-        const batchPath = path.join(os.tmpdir(), "relaunch_ide.bat");
+        const ideName = this.getIDEName();
+        let targetExe = shortcut.target || "";
+        if (!targetExe) {
+          try {
+            const info = await this._readWindowsShortcut(shortcut.path);
+            targetExe = info.target;
+          } catch (e) {
+            this.log(`Could not read target from shortcut: ${e.message}`);
+          }
+        }
+        const batchFileName = `relaunch_${ideName.replace(/\s+/g, "_")}_${Date.now()}.bat`;
+        const batchPath = path2.join(os.tmpdir(), batchFileName);
+        let commandLine = "";
+        if (!targetExe || targetExe.endsWith(".lnk")) {
+          this.log("Fallback: Could not resolve EXE, using shortcut path");
+          commandLine = `start "" "${shortcut.path}" ${folderArgs}`;
+        } else {
+          const safeTarget = `"${targetExe}"`;
+          commandLine = `start "" ${safeTarget} ${CDP_FLAG} ${folderArgs}`;
+        }
         const batchContent = `@echo off
 REM Auto Accept - IDE Relaunch Script
-timeout /t 2 /nobreak >nul
-start "" "${shortcut.path}" ${folderArgs}
+timeout /t 5 /nobreak >nul
+${commandLine}
+del "%~f0" & exit
 `;
         try {
           fs.writeFileSync(batchPath, batchContent, "utf8");
           this.log(`Created relaunch batch: ${batchPath}`);
-          this.log(`Shortcut path: ${shortcut.path}`);
-          const child = spawn("cmd.exe", ["/c", batchPath], {
+          this.log(`Command: ${commandLine}`);
+          const child = spawn("explorer.exe", [batchPath], {
             detached: true,
             stdio: "ignore",
             windowsHide: true
           });
           child.unref();
+          this.log("Explorer asked to run batch. Waiting for quit...");
           setTimeout(() => {
             this.log("Closing current window...");
             vscode2.commands.executeCommand("workbench.action.quit");
-          }, 1500);
+          }, 1e3);
           return { success: true };
         } catch (e) {
           this.log(`Relaunch failed: ${e.message}`);
@@ -5062,7 +4669,7 @@ start "" "${shortcut.path}" ${folderArgs}
       }
       async _relaunchMacOS(shortcut, workspaceFolders) {
         const folderArgs = workspaceFolders.map((f) => `"${f}"`).join(" ");
-        const scriptPath = path.join(os.tmpdir(), "relaunch_ide.sh");
+        const scriptPath = path2.join(os.tmpdir(), "relaunch_ide.sh");
         const launchCommand = shortcut.type === "wrapper" ? `"${shortcut.path}" ${folderArgs}` : `open -a "${shortcut.path}" --args ${CDP_FLAG} ${folderArgs}`;
         const scriptContent = `#!/bin/bash
 sleep 2
@@ -5094,8 +4701,8 @@ ${launchCommand}
         if (shortcut.execLine) {
           execCommand = shortcut.execLine.replace(/%[fFuUdDnNickvm]/g, "").trim();
         }
-        const scriptPath = path.join(os.tmpdir(), "relaunch_ide.sh");
-        const desktopFileName = path.basename(shortcut.path, ".desktop");
+        const scriptPath = path2.join(os.tmpdir(), "relaunch_ide.sh");
+        const desktopFileName = path2.basename(shortcut.path, ".desktop");
         const scriptContent = `#!/bin/bash
 sleep 2
 
@@ -5142,11 +4749,7 @@ exit 1
           return { success: false, error: e.message };
         }
       }
-      // ==================== MAIN ENTRY POINT ====================
-      /**
-       * Single entry point: Check CDP → Find Shortcut → Modify → Relaunch
-       * Called from the single notification hook in extension.js
-       */
+      // main function
       async relaunchWithCDP() {
         this.log("Starting relaunchWithCDP flow...");
         const cdpAvailable = await this.isCDPRunning();
@@ -5193,15 +4796,11 @@ exit 1
           };
         }
       }
-      /**
-       * Legacy compatibility: Alias for launchAndReplace
-       */
+      // legacy compatibility: wrapper for relaunch with cdp
       async launchAndReplace() {
         return await this.relaunchWithCDP();
       }
-      /**
-       * Show the single relaunch prompt (single notification hook)
-       */
+      // prompt user for relaunch
       async showRelaunchPrompt() {
         this.log("Showing relaunch prompt");
         const choice = await vscode2.window.showInformationMessage(
@@ -5220,9 +4819,7 @@ exit 1
         }
         return "cancelled";
       }
-      /**
-       * Legacy compatibility: Alias for showLaunchPrompt  
-       */
+      // legacy compatibility: wrapper for show relaunch prompt
       async showLaunchPrompt() {
         return await this.showRelaunchPrompt();
       }
@@ -5236,6 +4833,7 @@ exit 1
 
 // extension.js
 var vscode = require("vscode");
+var path = require("path");
 var SettingsPanel = null;
 function getSettingsPanel() {
   if (!SettingsPanel) {
@@ -5251,8 +4849,6 @@ var GLOBAL_STATE_KEY = "auto-accept-enabled-global";
 var PRO_STATE_KEY = "auto-accept-isPro";
 var FREQ_STATE_KEY = "auto-accept-frequency";
 var LICENSE_API = "https://auto-accept-backend.onrender.com/api";
-var LOCK_KEY = "auto-accept-instance-lock";
-var HEARTBEAT_KEY = "auto-accept-instance-heartbeat";
 var INSTANCE_ID = Math.random().toString(36).substring(7);
 var isEnabled = false;
 var isPro = false;
@@ -5284,15 +4880,10 @@ function log(message) {
   }
 }
 function detectIDE() {
-  try {
-    const appName = vscode.env.appName || "";
-    if (appName.toLowerCase().includes("cursor")) {
-      return "cursor";
-    }
-  } catch (e) {
-    console.error("Error detecting IDE:", e);
-  }
-  return "antigravity";
+  const appName = vscode.env.appName || "";
+  if (appName.toLowerCase().includes("cursor")) return "Cursor";
+  if (appName.toLowerCase().includes("antigravity")) return "Antigravity";
+  return "Code";
 }
 async function activate(context) {
   globalContext = context;
@@ -5356,6 +4947,13 @@ async function activate(context) {
       if (cdpHandler.setProStatus) {
         cdpHandler.setProStatus(isPro);
       }
+      try {
+        const logPath = path.join(context.extensionPath, "auto-accept-cdp.log");
+        cdpHandler.setLogFile(logPath);
+        log(`CDP logging to: ${logPath}`);
+      } catch (e) {
+        log(`Failed to set log file: ${e.message}`);
+      }
       relauncher = new Relauncher(log);
       log(`CDP handlers initialized for ${currentIDE}.`);
     } catch (err) {
@@ -5393,12 +4991,13 @@ async function activate(context) {
 }
 async function ensureCDPOrPrompt(showPrompt = false) {
   if (!cdpHandler) return;
+  log("Checking for active CDP session...");
   const cdpAvailable = await cdpHandler.isCDPAvailable();
   log(`Environment check: CDP Available = ${cdpAvailable}`);
   if (cdpAvailable) {
-    await cdpHandler.start();
+    log("CDP is active and available.");
   } else {
-    log("CDP not available.");
+    log("CDP not found on expected ports (9222-9232).");
     if (showPrompt && relauncher) {
       log("Prompting user for relaunch...");
       await relauncher.showRelaunchPrompt();
@@ -5409,8 +5008,9 @@ async function ensureCDPOrPrompt(showPrompt = false) {
 }
 async function checkEnvironmentAndStart() {
   if (isEnabled) {
+    log("Initializing Auto Accept environment...");
     await ensureCDPOrPrompt(false);
-    startPolling();
+    await startPolling();
   }
   updateStatusBar();
 }
@@ -5425,11 +5025,10 @@ async function handleToggle(context) {
     if (isEnabled) {
       log("Auto Accept: Enabled");
       await ensureCDPOrPrompt(true);
-      startPolling();
+      await startPolling();
     } else {
       log("Auto Accept: Disabled");
-      stopPolling();
-      if (cdpHandler) await cdpHandler.stop();
+      await stopPolling();
     }
     log("  Calling updateStatusBar...");
     updateStatusBar();
@@ -5448,6 +5047,14 @@ async function handleRelaunch() {
   const result = await relauncher.relaunchWithCDP();
   if (!result.success) {
     vscode.window.showErrorMessage(`Relaunch failed: ${result.message}`);
+  }
+}
+async function handleFrequencyUpdate(context, freq) {
+  pollFrequency = freq;
+  await context.globalState.update(FREQ_STATE_KEY, freq);
+  log(`Poll frequency updated to: ${freq}ms`);
+  if (isEnabled) {
+    await syncSessions();
   }
 }
 async function handleBackgroundToggle(context) {
@@ -5492,63 +5099,63 @@ async function handleBackgroundToggle(context) {
       await cdpHandler.hideBackgroundOverlay();
     }
   }
+  if (isEnabled) {
+    await syncSessions();
+  }
   updateStatusBar();
 }
-var agentState = "running";
-var retryCount = 0;
-var MAX_RETRIES = 3;
-function startPolling() {
+async function syncSessions() {
+  if (cdpHandler && !isLockedOut) {
+    log(`CDP: Syncing sessions (Mode: ${backgroundModeEnabled ? "Background" : "Simple"})...`);
+    try {
+      await cdpHandler.start({
+        isPro,
+        isBackgroundMode: backgroundModeEnabled,
+        pollInterval: pollFrequency,
+        ide: currentIDE
+      });
+    } catch (err) {
+      log(`CDP: Sync error: ${err.message}`);
+    }
+  }
+}
+async function startPolling() {
   if (pollTimer) clearInterval(pollTimer);
-  log("Auto Accept: Polling started");
+  log("Auto Accept: Monitoring session...");
+  await syncSessions();
   pollTimer = setInterval(async () => {
     if (!isEnabled) return;
-    if (currentIDE !== "cursor") {
-      const allowed = await checkInstanceLock();
-      if (!allowed) {
+    const lockKey = `${currentIDE.toLowerCase()}-instance-lock`;
+    const activeInstance = globalContext.globalState.get(lockKey);
+    const myId = globalContext.extension.id;
+    if (activeInstance && activeInstance !== myId) {
+      const lastPing = globalContext.globalState.get(`${lockKey}-ping`);
+      if (lastPing && Date.now() - lastPing < 15e3) {
         if (!isLockedOut) {
+          log(`CDP Control: Locked by another instance (${activeInstance}). Standby mode.`);
           isLockedOut = true;
-          log(`Instance Locked: Another VS Code window has the lock.`);
           updateStatusBar();
         }
         return;
-      } else {
-        if (isLockedOut) {
-          isLockedOut = false;
-          log(`Instance Unlocked: Acquired lock.`);
-          updateStatusBar();
-        }
       }
     }
-    if (agentState !== "running") {
-      agentState = "running";
+    globalContext.globalState.update(lockKey, myId);
+    globalContext.globalState.update(`${lockKey}-ping`, Date.now());
+    if (isLockedOut) {
+      log("CDP Control: Lock acquired. Resuming control.");
+      isLockedOut = false;
       updateStatusBar();
     }
-    if (cdpHandler && cdpHandler.isEnabled) {
-      await executeAccept();
-    }
-  }, pollFrequency);
+    await syncSessions();
+  }, 5e3);
 }
-function stopPolling() {
+async function stopPolling() {
   if (pollTimer) {
     clearInterval(pollTimer);
     pollTimer = null;
   }
+  if (cdpHandler) await cdpHandler.stop();
   log("Auto Accept: Polling stopped");
-}
-async function executeAccept() {
-  if (cdpHandler && cdpHandler.isEnabled) {
-    try {
-      const allowBackground = backgroundModeEnabled && isPro;
-      const res = await cdpHandler.executeAccept(allowBackground);
-      if (res.executed > 0 && agentState === "recovering") {
-        agentState = "recovered";
-        log("State transition: recovering -> recovered");
-        updateStatusBar();
-      }
-    } catch (e) {
-      log(`CDP execution error: ${e.message}`);
-    }
-  }
 }
 function updateStatusBar() {
   if (!statusBarItem) return;
@@ -5556,23 +5163,8 @@ function updateStatusBar() {
     let statusText = "ON";
     let tooltip = `Auto Accept is running.`;
     let bgColor = void 0;
-    if (agentState === "running") {
-      statusText = "ON";
-      if (cdpHandler && cdpHandler.getConnectionCount() > 0) {
-        tooltip += " (CDP Connected)";
-      }
-    } else if (agentState === "stalled") {
-      statusText = "WAITING";
-      tooltip = isPro ? "Waiting. Nothing to click right now." : "Waiting. Nothing to click right now.";
-      bgColor = new vscode.ThemeColor("statusBarItem.warningBackground");
-    } else if (agentState === "recovering") {
-      statusText = "TRYING...";
-      tooltip = `Trying again (${retryCount}/${MAX_RETRIES})`;
-      bgColor = new vscode.ThemeColor("statusBarItem.warningBackground");
-    } else if (agentState === "recovered") {
-      statusText = `FIXED (${retryCount})`;
-      tooltip = `Fixed after ${retryCount} tries.`;
-      bgColor = new vscode.ThemeColor("statusBarItem.errorBackground");
+    if (cdpHandler && cdpHandler.getConnectionCount() > 0) {
+      tooltip += " (CDP Connected)";
     }
     if (isLockedOut) {
       statusText = "PAUSED (Multi-window)";
@@ -5601,23 +5193,6 @@ function updateStatusBar() {
       statusBackgroundItem.hide();
     }
   }
-}
-async function checkInstanceLock() {
-  if (isPro) return true;
-  if (!globalContext) return true;
-  const lockId = globalContext.globalState.get(LOCK_KEY);
-  const lastHeartbeat = globalContext.globalState.get(HEARTBEAT_KEY, 0);
-  const now = Date.now();
-  if (!lockId || now - lastHeartbeat > 1e4) {
-    await globalContext.globalState.update(LOCK_KEY, INSTANCE_ID);
-    await globalContext.globalState.update(HEARTBEAT_KEY, now);
-    return true;
-  }
-  if (lockId === INSTANCE_ID) {
-    await globalContext.globalState.update(HEARTBEAT_KEY, now);
-    return true;
-  }
-  return false;
 }
 async function verifyLicense(context) {
   const userId = context.globalState.get("auto-accept-userId");
