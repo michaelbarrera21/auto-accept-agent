@@ -2,7 +2,7 @@
     "name": "auto-accept-agent",
     "displayName": "Auto Accept Agent",
     "description": "Auto Accept Agent: Automated Cursor and Antigravity workflow with Pro recovery tools.",
-    "version": "8.0.0",
+    "version": "8.5.0",
     "publisher": "MunKhin",
     "icon": "media/icon.png",
     "repository": {

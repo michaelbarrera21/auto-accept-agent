@@ -4531,28 +4531,31 @@ var require_relauncher = __commonJS({
        * Main entry point: ensures CDP is enabled and relaunches if necessary
        */
       async ensureCDPAndRelaunch() {
-        this.log("Checking shortcut for CDP flag...");
+        this.log("Checking if current process has CDP flag...");
         const hasFlag = await this.checkShortcutFlag();
         if (hasFlag) {
-          this.log("CDP flag already present in shortcut.");
+          this.log("CDP flag already present in current process.");
           return { success: true, relaunched: false };
         }
-        this.log("CDP flag missing. Attempting to modify shortcut...");
-        const modified = await this.modifyShortcut();
-        if (modified) {
-          this.log("Shortcut modified successfully. Prompting for restart...");
-          const choice = await vscode2.window.showInformationMessage(
-            "Auto Accept requires a quick restart to enable background mode. Restart now?",
-            "Restart",
-            "Later"
-          );
-          if (choice === "Restart") {
-            await this.relaunch();
-            return { success: true, relaunched: true };
-          }
+        this.log("CDP flag missing in current process. Attempting to ensure shortcut is correctly configured...");
+        const status = await this.modifyShortcut();
+        this.log(`Shortcut modification result: ${status}`);
+        if (status === "MODIFIED" || status === "READY") {
+          const ideName = this.getIdeName();
+          const msg = status === "MODIFIED" ? `Auto Accept: Shortcut updated! Please CLOSE and RESTART ${ideName} completely to enable Background Mode.` : `Auto Accept: Shortcut is already configured correctly, but this window isn't using it. Please CLOSE and RESTART ${ideName} completely to apply changes.`;
+          await vscode2.window.showInformationMessage(msg, { modal: true }, "Got it");
+          return { success: true, relaunched: false };
         } else {
-          this.log("Failed to modify shortcut automatically.");
-          vscode2.window.showErrorMessage("Auto Accept: Could not enable background mode automatically. Please add --remote-debugging-port=9000 to your IDE shortcut manually.");
+          this.log(`Failed to ensure shortcut configuration. Status: ${status}`);
+          const ideName = this.getIdeName();
+          vscode2.window.showErrorMessage(
+            `Auto Accept: Could not enable background mode automatically. Please add --remote-debugging-port=9000 to your ${ideName} shortcut manually, then restart.`,
+            "View Help"
+          ).then((selection) => {
+            if (selection === "View Help") {
+              vscode2.env.openExternal(vscode2.Uri.parse("https://github.com/Antigravity-AI/auto-accept#background-mode-setup"));
+            }
+          });
         }
         return { success: false, relaunched: false };
       }
@@ -4569,90 +4572,132 @@ var require_relauncher = __commonJS({
       async modifyShortcut() {
         try {
           if (this.platform === "win32") return await this._modifyWindowsShortcut();
-          if (this.platform === "darwin") return await this._modifyMacOSShortcut();
-          if (this.platform === "linux") return await this._modifyLinuxShortcut();
+          if (this.platform === "darwin") return await this._modifyMacOSShortcut() ? "MODIFIED" : "FAILED";
+          if (this.platform === "linux") return await this._modifyLinuxShortcut() ? "MODIFIED" : "FAILED";
         } catch (e) {
           this.log(`Modification error: ${e.message}`);
         }
-        return false;
+        return "FAILED";
       }
       async _modifyWindowsShortcut() {
         const ideName = this.getIdeName();
+        this.log(`Starting Windows shortcut modification for ${ideName}...`);
         const script = `
-$ErrorActionPreference = "SilentlyContinue"
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$ErrorActionPreference = "Continue"
 $WshShell = New-Object -ComObject WScript.Shell
-$DesktopPath = [System.IO.Path]::Combine($env:USERPROFILE, "Desktop")
-$StartMenuPath = [System.IO.Path]::Combine($env:APPDATA, "Microsoft", "Windows", "Start Menu", "Programs")
 
-$Shortcuts = Get-ChildItem "$DesktopPath\\*.lnk", "$StartMenuPath\\*.lnk" -Recurse | Where-Object { $_.Name -like "*${ideName}*" }
+$TargetFolders = @(
+    [Environment]::GetFolderPath("Desktop"),
+    [Environment]::GetFolderPath("Programs"),
+    [Environment]::GetFolderPath("CommonPrograms"),
+    [Environment]::GetFolderPath("StartMenu"),
+    [System.IO.Path]::Combine($env:APPDATA, "Microsoft", "Internet Explorer", "Quick Launch", "User Pinned", "TaskBar"),
+    [System.IO.Path]::Combine($env:USERPROFILE, "Desktop")
+)
 
-$modified = $false
-foreach ($file in $Shortcuts) {
-    try {
-        $shortcut = $WshShell.CreateShortcut($file.FullName)
-        if ($shortcut.Arguments -notlike "*--remote-debugging-port=9000*") {
-            $shortcut.Arguments = "--remote-debugging-port=9000 " + $shortcut.Arguments
-            $shortcut.Save()
-            $modified = $true
+# Search ONLY for the current IDE variant
+$SearchPatterns = @("*${ideName}*")
+
+$anyModified = $false
+$anyReady = $false
+
+foreach ($folder in $TargetFolders) {
+    if (Test-Path $folder) {
+        Write-Output "DEBUG: Searching folder: $folder"
+        foreach ($pattern in $SearchPatterns) {
+            $files = Get-ChildItem -Path $folder -Filter "$pattern.lnk" -Recurse
+            foreach ($file in $files) {
+                Write-Output "DEBUG: Found shortcut: $($file.FullName)"
+                try {
+                    $shortcut = $WshShell.CreateShortcut($file.FullName)
+                    if ($shortcut.Arguments -notlike "*--remote-debugging-port=9000*") {
+                        if ($shortcut.Arguments -match "--remote-debugging-port=\\d+") {
+                            $shortcut.Arguments = $shortcut.Arguments -replace "--remote-debugging-port=\\d+", "--remote-debugging-port=9000"
+                        } else {
+                            $shortcut.Arguments = "--remote-debugging-port=9000 " + $shortcut.Arguments
+                        }
+                        $shortcut.Save()
+                        Write-Output "DEBUG: SUCCESSFULLY MODIFIED: $($file.FullName)"
+                        $anyModified = $true
+                    } else {
+                        Write-Output "DEBUG: Flag already present in: $($file.FullName)"
+                        $anyReady = $true
+                    }
+                } catch {
+                    Write-Output "DEBUG: ERROR modifying $($file.FullName): $($_.Exception.Message)"
+                }
+            }
         }
-    } catch {}
+    }
 }
-if ($modified) { Write-Output "MODIFIED" } else { Write-Output "NO_CHANGE" }
+
+if ($anyModified) { Write-Output "RESULT: MODIFIED" } 
+elseif ($anyReady) { Write-Output "RESULT: READY" }
+else { Write-Output "RESULT: NOT_FOUND" }
 `;
         const result = this._runPowerShell(script);
-        return result.includes("MODIFIED");
+        this.log(`PowerShell Output:
+${result}`);
+        if (result.includes("RESULT: MODIFIED")) return "MODIFIED";
+        if (result.includes("RESULT: READY")) return "READY";
+        return "NOT_FOUND";
       }
       async _modifyMacOSShortcut() {
         const ideName = this.getIdeName();
         const binDir = path2.join(os.homedir(), ".local", "bin");
-        const wrapperPath = path2.join(binDir, `${ideName.toLowerCase()}-cdp`);
         if (!fs.existsSync(binDir)) fs.mkdirSync(binDir, { recursive: true });
-        const appPath = this.getIdeName() === "Code" ? "/Applications/Visual Studio Code.app" : `/Applications/${ideName}.app`;
+        const wrapperPath = path2.join(binDir, `${ideName.toLowerCase()}-cdp`);
+        const locations = ["/Applications", path2.join(os.homedir(), "Applications")];
+        const appNames = [`${ideName}.app`, "Cursor.app", "Visual Studio Code.app"];
+        let foundAppPath = "";
+        for (const loc of locations) {
+          for (const name of appNames) {
+            const p = path2.join(loc, name);
+            if (fs.existsSync(p)) {
+              foundAppPath = p;
+              break;
+            }
+          }
+          if (foundAppPath) break;
+        }
+        if (!foundAppPath) return false;
         const content = `#!/bin/bash
-open -a "${appPath}" --args --remote-debugging-port=9000 "$@"`;
+open -a "${foundAppPath}" --args --remote-debugging-port=9000 "$@"`;
         fs.writeFileSync(wrapperPath, content, { mode: 493 });
-        this.log(`Created macOS wrapper at ${wrapperPath}`);
+        this.log(`Created macOS wrapper at ${wrapperPath} for ${foundAppPath}`);
         return true;
       }
       async _modifyLinuxShortcut() {
         const ideName = this.getIdeName().toLowerCase();
-        const desktopPaths = [
-          path2.join(os.homedir(), ".local", "share", "applications", `${ideName}.desktop`),
-          `/usr/share/applications/${ideName}.desktop`
+        const desktopDirs = [
+          path2.join(os.homedir(), ".local", "share", "applications"),
+          "/usr/share/applications",
+          "/usr/local/share/applications"
         ];
-        for (const p of desktopPaths) {
-          if (fs.existsSync(p)) {
-            let content = fs.readFileSync(p, "utf8");
-            if (!content.includes("--remote-debugging-port=9000")) {
-              content = content.replace(/^Exec=(.*)$/m, "Exec=$1 --remote-debugging-port=9000");
-              const userPath = path2.join(os.homedir(), ".local", "share", "applications", path2.basename(p));
-              fs.mkdirSync(path2.dirname(userPath), { recursive: true });
-              fs.writeFileSync(userPath, content);
-              return true;
+        let modified = false;
+        for (const dir of desktopDirs) {
+          if (!fs.existsSync(dir)) continue;
+          const files = fs.readdirSync(dir).filter((f) => f.endsWith(".desktop"));
+          for (const file of files) {
+            if (file.includes(ideName) || file.includes("cursor")) {
+              const p = path2.join(dir, file);
+              try {
+                let content = fs.readFileSync(p, "utf8");
+                if (!content.includes("--remote-debugging-port=9000")) {
+                  content = content.replace(/^Exec=(.*)$/m, "Exec=$1 --remote-debugging-port=9000");
+                  const userDir = path2.join(os.homedir(), ".local", "share", "applications");
+                  if (!fs.existsSync(userDir)) fs.mkdirSync(userDir, { recursive: true });
+                  const userPath = path2.join(userDir, file);
+                  fs.writeFileSync(userPath, content);
+                  modified = true;
+                }
+              } catch (e) {
+              }
             }
           }
         }
-        return false;
-      }
-      /**
-       * Relaunch the IDE using the modified shortcut/wrapper
-       */
-      async relaunch() {
-        const folders = (vscode2.workspace.workspaceFolders || []).map((f) => `"${f.uri.fsPath}"`).join(" ");
-        if (this.platform === "win32") {
-          const ideName = this.getIdeName();
-          const cmd = `timeout /t 2 /nobreak >nul & start "" "${ideName}" ${folders}`;
-          spawn("cmd.exe", ["/c", cmd], { detached: true, stdio: "ignore" }).unref();
-        } else if (this.platform === "darwin") {
-          const ideName = this.getIdeName();
-          const wrapperPath = path2.join(os.homedir(), ".local", "bin", `${ideName.toLowerCase()}-cdp`);
-          const cmd = `sleep 2 && "${wrapperPath}" ${folders}`;
-          spawn("sh", ["-c", cmd], { detached: true, stdio: "ignore" }).unref();
-        } else {
-          const cmd = `sleep 2 && ${this.getIdeName().toLowerCase()} --remote-debugging-port=9000 ${folders}`;
-          spawn("sh", ["-c", cmd], { detached: true, stdio: "ignore" }).unref();
-        }
-        setTimeout(() => vscode2.commands.executeCommand("workbench.action.quit"), 500);
+        return modified;
       }
       _runPowerShell(script) {
         try {
@@ -4881,7 +4926,7 @@ async function ensureCDPOrPrompt(showPrompt = false) {
   } else {
     log("CDP not found on target ports (9000 +/- 3).");
     if (showPrompt && relauncher) {
-      log("Initiating CDP setup and relaunch flow...");
+      log("Initiating CDP setup flow...");
       await relauncher.ensureCDPAndRelaunch();
     }
     return false;
@@ -4945,7 +4990,7 @@ async function handleRelaunch() {
     vscode.window.showErrorMessage("Relauncher not initialized.");
     return;
   }
-  log("Initiating Relaunch sequence...");
+  log("Initiating CDP Setup flow...");
   await relauncher.ensureCDPAndRelaunch();
 }
 async function handleFrequencyUpdate(context, freq) {

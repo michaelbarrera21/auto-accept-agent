@@ -277,7 +277,7 @@ async function ensureCDPOrPrompt(showPrompt = false) {
     } else {
         log('CDP not found on target ports (9000 +/- 3).');
         if (showPrompt && relauncher) {
-            log('Initiating CDP setup and relaunch flow...');
+            log('Initiating CDP setup flow...');
             await relauncher.ensureCDPAndRelaunch();
         }
         return false;
@@ -363,7 +363,7 @@ async function handleRelaunch() {
         return;
     }
 
-    log('Initiating Relaunch sequence...');
+    log('Initiating CDP Setup flow...');
     await relauncher.ensureCDPAndRelaunch();
 }
 
