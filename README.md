@@ -42,14 +42,16 @@ Visual indicators show conversation state:
 - ✅ Cursor
 - ✅ Multiple windows
 - ✅ Minimized/unfocused
+- ✅ Multi-instance (Smart Port Detection)
 
 ---
 
 ## Quick Start
 
 1. **Install** the extension
-2. **Relaunch** when prompted (one-click)
-3. **Done** — Auto Accept activates automatically
+2. **Click** `Auto Accept: OFF` in the status bar
+3. **Allow** the one-time shortcut update if prompted
+4. **Done** — Auto Accept activates automatically
 
 The extension runs silently. Check the status bar for `Auto Accept: ON`.
 
@@ -64,7 +66,9 @@ The extension runs silently. Check the status bar for `Auto Accept: ON`.
 | Custom banned commands | — | ✅ |
 | Adjustable polling speed | — | ✅ |
 | Stuck agent recovery | — | ✅ |
+| Stuck agent recovery | — | ✅ |
 | Multi-window support | — | ✅ |
+| Smart Port Detection | ✅ | ✅ |
 
 
 ---
