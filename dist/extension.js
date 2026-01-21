@@ -5128,7 +5128,8 @@ ${result}`);
       }
       async _modifyMacOSShortcut() {
         const ideName = this.getIdeName();
-        const destPath = path2.join(os.homedir(), "Desktop", `Launch ${ideName} (Debug).app`);
+        const localizedAppName = Loc2.t("Start {0} Auto Accept", ideName);
+        const destPath = path2.join(os.homedir(), "Desktop", `${localizedAppName}.app`);
         const appNames = [`${ideName}.app`, "Cursor.app", "Visual Studio Code.app"];
         const locations = ["/Applications", path2.join(os.homedir(), "Applications")];
         let foundAppPath = "";
@@ -5151,7 +5152,7 @@ ${result}`);
           execSync(`osacompile -o "${destPath}" -e '${script}'`);
           this.log(`Created macOS launcher at ${destPath}`);
           vscode2.window.showInformationMessage(
-            Loc2.t('Created "Launch {0} (Debug).app" on your Desktop. Use this to start the IDE with automation enabled.', ideName)
+            Loc2.t('Created "{0}.app" on your Desktop. Use this to start the IDE with automation enabled.', localizedAppName)
           );
           return true;
         } catch (e) {
