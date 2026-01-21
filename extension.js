@@ -26,6 +26,7 @@ const LICENSE_API = 'https://auto-accept-backend.onrender.com/api';
 // Locking
 const LOCK_KEY = 'auto-accept-instance-lock';
 const HEARTBEAT_KEY = 'auto-accept-instance-heartbeat';
+const PENDING_ENABLE_KEY = 'auto-accept-pending-enable'; // Auto-enable after restart
 const INSTANCE_ID = Math.random().toString(36).substring(7);
 
 let isEnabled = false;
@@ -108,6 +109,15 @@ async function activate(context) {
         // 1. Initialize State
         isEnabled = context.globalState.get(GLOBAL_STATE_KEY, false);
         isPro = context.globalState.get(PRO_STATE_KEY, false);
+
+        // Check for pending auto-enable (set after shortcut modification)
+        const pendingEnable = context.globalState.get(PENDING_ENABLE_KEY, false);
+        if (pendingEnable) {
+            log('Pending enable flag detected - auto-enabling Auto Accept');
+            isEnabled = true;
+            context.globalState.update(GLOBAL_STATE_KEY, true);
+            context.globalState.update(PENDING_ENABLE_KEY, false);
+        }
 
         // Read settings from VS Code configuration
         const config = vscode.workspace.getConfiguration('autoAccept');
@@ -201,7 +211,7 @@ async function activate(context) {
             const { Relauncher } = require('./main_scripts/relauncher');
 
             cdpHandler = new CDPHandler(log, { cdpPort: configCdpPort });
-            relauncher = new Relauncher(log);
+            relauncher = new Relauncher(log, context);
             log(`CDP handlers initialized for ${currentIDE}.`);
         } catch (err) {
             log(`Failed to initialize CDP handlers: ${err.message}`);

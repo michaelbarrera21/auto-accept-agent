@@ -4710,9 +4710,10 @@ var require_relauncher = __commonJS({
     var CDP_PORT = 9e3;
     var CDP_FLAG = `--remote-debugging-port=${CDP_PORT}`;
     var Relauncher = class {
-      constructor(logger = console.log) {
+      constructor(logger = console.log, context = null) {
         this.platform = os.platform();
         this.logger = logger;
+        this.context = context;
       }
       log(msg) {
         this.logger(`[Relauncher] ${msg}`);
@@ -4740,15 +4741,12 @@ var require_relauncher = __commonJS({
         const status = await this.modifyShortcut();
         this.log(`Shortcut modification result: ${status}`);
         if (status === "MODIFIED" || status === "READY") {
-          const ideName = this.getIdeName();
-          const msg = status === "MODIFIED" ? `Auto Accept: Shortcut updated! Please CLOSE and RESTART ${ideName} completely to enable Background Mode.` : `Auto Accept: Shortcut is already configured correctly, but this window isn't using it. Please CLOSE and RESTART ${ideName} completely to apply changes.`;
-          await vscode2.window.showInformationMessage(msg, { modal: true }, "Got it");
           return { success: true, relaunched: false };
         } else {
           this.log(`Failed to ensure shortcut configuration. Status: ${status}`);
           const ideName = this.getIdeName();
           vscode2.window.showErrorMessage(
-            `Auto Accept: Could not enable background mode automatically. Please add --remote-debugging-port=9000 to your ${ideName} shortcut manually, then restart.`,
+            `Auto Accept: Could not configure automatically. Please add --remote-debugging-port=9000 to your ${ideName} shortcut manually, then restart.`,
             "View Help"
           ).then((selection) => {
             if (selection === "View Help") {
@@ -4781,7 +4779,12 @@ var require_relauncher = __commonJS({
           return "CANCELLED";
         }
         try {
-          if (this.platform === "win32") return await this._modifyWindowsShortcut();
+          if (this.platform === "win32") {
+            const shortcutResult = await this._modifyWindowsShortcut();
+            const registryResult = await this._modifyWindowsRegistry();
+            this.log(`Registry modifications: ${JSON.stringify(registryResult)}`);
+            return shortcutResult;
+          }
           if (this.platform === "darwin") return await this._modifyMacOSShortcut() ? "MODIFIED" : "FAILED";
           if (this.platform === "linux") return await this._modifyLinuxShortcut() ? "MODIFIED" : "FAILED";
         } catch (e) {
@@ -4806,84 +4809,244 @@ $TargetFolders = @(
     [System.IO.Path]::Combine($env:USERPROFILE, "Desktop")
 )
 
-# Search ONLY for the exact IDE shortcut
-$SearchPatterns = @("${ideName}.lnk")
+# Target executable name to match - ONLY the current IDE
+$TargetExeName = "${ideName}.exe"
 
-$anyModified = $false
-$anyReady = $false
-$targetPort = 9000
+$modifiedList = @()
+$readyList = @()
+$searchedFolders = @()
 
 foreach ($folder in $TargetFolders) {
     if (Test-Path $folder) {
+        $searchedFolders += $folder
         Write-Output "DEBUG: Searching folder: $folder"
-        foreach ($pattern in $SearchPatterns) {
-            $files = Get-ChildItem -Path $folder -Filter "$pattern.lnk" -Recurse -ErrorAction SilentlyContinue
-            foreach ($file in $files) {
-                Write-Output "DEBUG: Found shortcut: $($file.FullName)"
-                try {
-                    $shortcut = $WshShell.CreateShortcut($file.FullName)
-                    $args = $shortcut.Arguments
+        
+        # Search ALL .lnk files
+        $files = Get-ChildItem -Path $folder -Filter "*.lnk" -Recurse -ErrorAction SilentlyContinue
+        foreach ($file in $files) {
+            try {
+                $shortcut = $WshShell.CreateShortcut($file.FullName)
+                $targetPath = $shortcut.TargetPath
+                
+                # Check if target matches current IDE executable
+                if ($targetPath -notlike "*$TargetExeName") { continue }
+                
+                Write-Output "DEBUG: Found matching shortcut: $($file.FullName) -> $targetPath"
+                
+                $args = $shortcut.Arguments
+                
+                # --- Port Calculation Logic ---
+                $portToUse = 9000
+                if ($args -match '--user-data-dir=["'']?([^"''\\s]+)["'']?') {
+                    $profilePath = $Matches[1]
+                    Write-Output "DEBUG: Found user-data-dir: $profilePath"
                     
-                    # --- Port Calculation Logic ---
-                    $portToUse = 9000
-                    if ($args -match '--user-data-dir=["'']?([^"''s]+)["'']?') {
-                        $profilePath = $Matches[1]
-                        Write-Output "DEBUG: Found user-data-dir: $profilePath"
-                        
-                        # Calculate stable hash for port 9001-9050
-                        $md5 = [System.Security.Cryptography.MD5]::Create()
-                        $pathBytes = [System.Text.Encoding]::UTF8.GetBytes($profilePath)
-                        $hashBytes = $md5.ComputeHash($pathBytes)
-                        # Use first 2 bytes to get a number
-                        $val = [BitConverter]::ToUInt16($hashBytes, 0)
-                        $portToUse = 9001 + ($val % 50)
-                        Write-Output "DEBUG: Calculated dynamic port: $portToUse"
-                    } else {
-                        Write-Output "DEBUG: No user-data-dir found, using default port 9000"
-                    }
-                    
-                    $targetPort = $portToUse
-                    $portFlag = "--remote-debugging-port=$portToUse"
-
-                    if ($args -notlike "*--remote-debugging-port=$portToUse*") {
-                        # Remove existing port flag if any (different port)
-                        if ($args -match "--remote-debugging-port=\\d+") {
-                            $shortcut.Arguments = $args -replace "--remote-debugging-port=\\d+", $portFlag
-                        } else {
-                            $shortcut.Arguments = "$portFlag " + $args
-                        }
-                        
-                        $shortcut.Save()
-                        Write-Output "DEBUG: SUCCESSFULLY MODIFIED: $($file.FullName) to use port $portToUse"
-                        $anyModified = $true
-                    } else {
-                        Write-Output "DEBUG: Correct flag already present in: $($file.FullName)"
-                        $anyReady = $true
-                    }
-                } catch {
-                    Write-Output "DEBUG: ERROR modifying $($file.FullName): $($_.Exception.Message)"
+                    # Calculate stable hash for port 9001-9050
+                    $md5 = [System.Security.Cryptography.MD5]::Create()
+                    $pathBytes = [System.Text.Encoding]::UTF8.GetBytes($profilePath)
+                    $hashBytes = $md5.ComputeHash($pathBytes)
+                    $val = [BitConverter]::ToUInt16($hashBytes, 0)
+                    $portToUse = 9001 + ($val % 50)
+                    Write-Output "DEBUG: Calculated dynamic port: $portToUse"
+                } else {
+                    Write-Output "DEBUG: No user-data-dir found, using default port 9000"
                 }
+                
+                $portFlag = "--remote-debugging-port=$portToUse"
+
+                if ($args -notlike "*--remote-debugging-port=$portToUse*") {
+                    # Remove existing port flag if any (different port)
+                    if ($args -match "--remote-debugging-port=\\d+") {
+                        $shortcut.Arguments = $args -replace "--remote-debugging-port=\\d+", $portFlag
+                    } else {
+                        $shortcut.Arguments = "$portFlag " + $args
+                    }
+                    
+                    $shortcut.Save()
+                    Write-Output "DEBUG: SUCCESSFULLY MODIFIED: $($file.FullName) to use port $portToUse"
+                    $modifiedList += "$($file.Name)|$portToUse"
+                } else {
+                    Write-Output "DEBUG: Correct flag already present in: $($file.FullName)"
+                    $readyList += "$($file.Name)|$portToUse"
+                }
+            } catch {
+                Write-Output "DEBUG: ERROR processing $($file.FullName): $($_.Exception.Message)"
             }
         }
     }
 }
 
-if ($anyModified) { Write-Output "RESULT: MODIFIED" } 
-elseif ($anyReady) { Write-Output "RESULT: READY" }
-else { Write-Output "RESULT: NOT_FOUND" }
+# Output results in parseable format
+if ($modifiedList.Count -gt 0) {
+    Write-Output "RESULT: MODIFIED"
+    foreach ($item in $modifiedList) {
+        Write-Output "MODIFIED_ITEM: $item"
+    }
+} elseif ($readyList.Count -gt 0) {
+    Write-Output "RESULT: READY"
+    foreach ($item in $readyList) {
+        Write-Output "READY_ITEM: $item"
+    }
+} else {
+    Write-Output "RESULT: NOT_FOUND"
+    Write-Output "SEARCHED_FOLDERS: $($searchedFolders -join '; ')"
+}
 `;
         const result = this._runPowerShell(script);
         this.log(`PowerShell Output:
 ${result}`);
-        if (result.includes("RESULT: MODIFIED")) return "MODIFIED";
-        if (result.includes("RESULT: READY")) return "READY";
+        if (result.includes("RESULT: MODIFIED")) {
+          const modifiedItems = this._parseResultItems(result, "MODIFIED_ITEM");
+          this._showModificationResults(modifiedItems, "modified");
+          return "MODIFIED";
+        }
+        if (result.includes("RESULT: READY")) {
+          const readyItems = this._parseResultItems(result, "READY_ITEM");
+          this._showModificationResults(readyItems, "ready");
+          return "READY";
+        }
         return "NOT_FOUND";
+      }
+      _parseResultItems(output, prefix) {
+        const items = [];
+        const lines = output.split("\n");
+        for (const line of lines) {
+          if (line.startsWith(`${prefix}: `)) {
+            const parts = line.substring(prefix.length + 2).trim().split("|");
+            if (parts.length === 2) {
+              items.push({ name: parts[0], port: parts[1] });
+            }
+          }
+        }
+        return items;
+      }
+      _showModificationResults(items, status) {
+        if (items.length === 0) return;
+        const ideName = this.getIdeName();
+        let message = "";
+        let detail = "";
+        if (status === "modified") {
+          message = `\u2705 Auto Accept: \u5DF2\u4FEE\u6539 ${items.length} \u4E2A\u5FEB\u6377\u65B9\u5F0F`;
+          detail = items.map((i) => `\u2022 ${i.name} \u2192 \u7AEF\u53E3 ${i.port}`).join("\n");
+        } else {
+          message = `\u2705 Auto Accept: ${items.length} \u4E2A\u5FEB\u6377\u65B9\u5F0F\u5DF2\u5C31\u7EEA`;
+          detail = items.map((i) => `\u2022 ${i.name} \u2192 \u7AEF\u53E3 ${i.port}`).join("\n");
+        }
+        vscode2.window.showInformationMessage(
+          `${message}
+
+${detail}
+
+\u8BF7\u5B8C\u5168\u5173\u95ED\u5E76\u91CD\u542F ${ideName} \u4EE5\u5E94\u7528\u66F4\u6539\u3002`,
+          { modal: true },
+          "Got it"
+        ).then(() => {
+          if (this.context && this.context.globalState) {
+            this.context.globalState.update("auto-accept-pending-enable", true);
+            this.log("Set pending enable flag for auto-start after restart");
+          }
+        });
+      }
+      /**
+       * Modify Windows registry context menu entries
+       * Returns: { modified: string[], ready: string[], failed: string[] }
+       */
+      async _modifyWindowsRegistry() {
+        const ideName = this.getIdeName();
+        this.log(`Starting Windows registry modification for ${ideName}...`);
+        const script = [
+          "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8",
+          '$ErrorActionPreference = "Continue"',
+          "",
+          "# Registry paths where context menu commands live",
+          "$RegistryPaths = @(",
+          '    "Registry::HKEY_CLASSES_ROOT\\*\\shell",',
+          '    "Registry::HKEY_CLASSES_ROOT\\Directory\\shell",',
+          '    "Registry::HKEY_CLASSES_ROOT\\Directory\\Background\\shell"',
+          ")",
+          "",
+          `$TargetExeName = "${ideName}.exe"`,
+          '$PortFlag = "--remote-debugging-port=9000"',
+          "",
+          "$modifiedList = @()",
+          "$readyList = @()",
+          "$failedList = @()",
+          "",
+          "foreach ($basePath in $RegistryPaths) {",
+          "    if (-not (Test-Path $basePath)) { continue }",
+          "    $subkeys = Get-ChildItem -Path $basePath -ErrorAction SilentlyContinue",
+          "    foreach ($subkey in $subkeys) {",
+          '        $commandPath = Join-Path $subkey.PSPath "command"',
+          "        if (-not (Test-Path $commandPath)) { continue }",
+          "        try {",
+          '            $cmdValue = (Get-ItemProperty -Path $commandPath -Name "(default)" -ErrorAction SilentlyContinue)."(default)"',
+          "            if (-not $cmdValue) { continue }",
+          '            if ($cmdValue -notlike "*$TargetExeName*") { continue }',
+          "            $friendlyName = $subkey.PSChildName",
+          '            Write-Output "DEBUG: Found: $friendlyName"',
+          '            if ($cmdValue -like "*--remote-debugging-port=*") {',
+          '                Write-Output "DEBUG: Already configured: $friendlyName"',
+          "                $readyList += $friendlyName",
+          "                continue",
+          "            }",
+          "            # Insert port flag before %V or %1",
+          `            if ($cmdValue -match '"%V"' -or $cmdValue -match '%V') {`,
+          `                $newValue = $cmdValue -replace '("%V"|%V)', "$PortFlag \`$1"`,
+          `            } elseif ($cmdValue -match '"%1"' -or $cmdValue -match '%1') {`,
+          `                $newValue = $cmdValue -replace '("%1"|%1)', "$PortFlag \`$1"`,
+          "            } else {",
+          '                $newValue = "$cmdValue $PortFlag"',
+          "            }",
+          '            Write-Output "DEBUG: New value: $newValue"',
+          '            Set-ItemProperty -Path $commandPath -Name "(default)" -Value $newValue -ErrorAction Stop',
+          '            Write-Output "DEBUG: MODIFIED: $friendlyName"',
+          "            $modifiedList += $friendlyName",
+          "        } catch {",
+          '            Write-Output "DEBUG: FAILED: $($subkey.PSChildName) - $($_.Exception.Message)"',
+          "            $failedList += $subkey.PSChildName",
+          "        }",
+          "    }",
+          "}",
+          "",
+          "if ($modifiedList.Count -gt 0) {",
+          '    Write-Output "REGISTRY_RESULT: MODIFIED"',
+          '    foreach ($item in $modifiedList) { Write-Output "REGISTRY_MODIFIED: $item" }',
+          "}",
+          "if ($readyList.Count -gt 0) {",
+          '    Write-Output "REGISTRY_RESULT: READY"',
+          '    foreach ($item in $readyList) { Write-Output "REGISTRY_READY: $item" }',
+          "}",
+          "if ($failedList.Count -gt 0) {",
+          '    Write-Output "REGISTRY_RESULT: FAILED"',
+          '    foreach ($item in $failedList) { Write-Output "REGISTRY_FAILED: $item" }',
+          "}",
+          "if ($modifiedList.Count -eq 0 -and $readyList.Count -eq 0) {",
+          '    Write-Output "REGISTRY_RESULT: NOT_FOUND"',
+          "}"
+        ].join("\n");
+        const result = this._runPowerShell(script);
+        this.log(`Registry PowerShell Output:
+${result}`);
+        const modified = this._parseRegistryItems(result, "REGISTRY_MODIFIED");
+        const ready = this._parseRegistryItems(result, "REGISTRY_READY");
+        const failed = this._parseRegistryItems(result, "REGISTRY_FAILED");
+        return { modified, ready, failed };
+      }
+      _parseRegistryItems(output, prefix) {
+        const items = [];
+        const lines = output.split("\n");
+        for (const line of lines) {
+          if (line.startsWith(`${prefix}: `)) {
+            items.push(line.substring(prefix.length + 2).trim());
+          }
+        }
+        return items;
       }
       async _modifyMacOSShortcut() {
         const ideName = this.getIdeName();
         const binDir = path2.join(os.homedir(), ".local", "bin");
         if (!fs.existsSync(binDir)) fs.mkdirSync(binDir, { recursive: true });
-        const wrapperPath = path2.join(binDir, `${ideName.toLowerCase()}-cdp`);
+        const wrapperPath = path2.join(binDir, `${ideName.toLowerCase()} -cdp`);
         const locations = ["/Applications", path2.join(os.homedir(), "Applications")];
         const appNames = [`${ideName}.app`, "Cursor.app", "Visual Studio Code.app"];
         let foundAppPath = "";
@@ -4899,7 +5062,7 @@ ${result}`);
         }
         if (!foundAppPath) return false;
         const content = `#!/bin/bash
-open -a "${foundAppPath}" --args --remote-debugging-port=9000 "$@"`;
+open - a "${foundAppPath}" --args--remote - debugging - port=9000 "$@"`;
         fs.writeFileSync(wrapperPath, content, { mode: 493 });
         this.log(`Created macOS wrapper at ${wrapperPath} for ${foundAppPath}`);
         return true;
@@ -4939,7 +5102,7 @@ open -a "${foundAppPath}" --args --remote-debugging-port=9000 "$@"`;
         try {
           const tempFile = path2.join(os.tmpdir(), `relaunch_${Date.now()}.ps1`);
           fs.writeFileSync(tempFile, script, "utf8");
-          const result = execSync(`powershell -ExecutionPolicy Bypass -File "${tempFile}"`, { encoding: "utf8" });
+          const result = execSync(`powershell - ExecutionPolicy Bypass - File "${tempFile}"`, { encoding: "utf8" });
           fs.unlinkSync(tempFile);
           return result;
         } catch (e) {
@@ -4972,6 +5135,7 @@ var BANNED_COMMANDS_KEY = "auto-accept-banned-commands";
 var ROI_STATS_KEY = "auto-accept-roi-stats";
 var SECONDS_PER_CLICK = 5;
 var LICENSE_API = "https://auto-accept-backend.onrender.com/api";
+var PENDING_ENABLE_KEY = "auto-accept-pending-enable";
 var INSTANCE_ID = Math.random().toString(36).substring(7);
 var isEnabled = false;
 var isPro = false;
@@ -5035,6 +5199,13 @@ async function activate(context) {
   try {
     isEnabled = context.globalState.get(GLOBAL_STATE_KEY, false);
     isPro = context.globalState.get(PRO_STATE_KEY, false);
+    const pendingEnable = context.globalState.get(PENDING_ENABLE_KEY, false);
+    if (pendingEnable) {
+      log("Pending enable flag detected - auto-enabling Auto Accept");
+      isEnabled = true;
+      context.globalState.update(GLOBAL_STATE_KEY, true);
+      context.globalState.update(PENDING_ENABLE_KEY, false);
+    }
     const config = vscode.workspace.getConfiguration("autoAccept");
     const localVipOverride = config.get("localVipOverride", false);
     const configCdpPort = config.get("cdpPort", null);
@@ -5099,7 +5270,7 @@ async function activate(context) {
       const { CDPHandler } = require_cdp_handler();
       const { Relauncher } = require_relauncher();
       cdpHandler = new CDPHandler(log, { cdpPort: configCdpPort });
-      relauncher = new Relauncher(log);
+      relauncher = new Relauncher(log, context);
       log(`CDP handlers initialized for ${currentIDE}.`);
     } catch (err) {
       log(`Failed to initialize CDP handlers: ${err.message}`);
