@@ -108,7 +108,7 @@ for ($i = 0; $i -lt 10; $i++) {
     try {
         $proc = Get-CimInstance Win32_Process -Filter "ProcessId = $current" -ErrorAction SilentlyContinue
         if ($proc -and $proc.CommandLine) {
-            if ($proc.CommandLine -match '--remote-debugging-port=(\\\\d+)') {
+            if ($proc.CommandLine -match '--remote-debugging-port=(\\d+)') {
                 Write-Output $Matches[1]
                 exit 0
             }

@@ -5571,8 +5571,25 @@ async function checkEnvironmentAndStart() {
 }
 async function handleToggle(context) {
   log("=== handleToggle CALLED ===");
-  log(`  Previous userWantsEnabled: ${userWantsEnabled}`);
+  log(`  Previous userWantsEnabled: ${userWantsEnabled}, cdpAvailable: ${cdpAvailable}`);
   try {
+    if (userWantsEnabled && !cdpAvailable) {
+      log("Auto Accept: In BLOCKED state. Triggering CDP setup instead of toggling off...");
+      if (relauncher) {
+        await relauncher.ensureCDPAndRelaunch();
+      }
+      cdpAvailable = cdpHandler ? await cdpHandler.isCDPAvailable() : false;
+      if (cdpAvailable) {
+        await startPolling();
+        isRunning = true;
+        startStatsCollection(context);
+        incrementSessionCount(context);
+        log("Auto Accept: CDP now available. Running.");
+      }
+      updateStatusBar();
+      log("=== handleToggle COMPLETE (BLOCKED -> setup) ===");
+      return;
+    }
     userWantsEnabled = !userWantsEnabled;
     await context.globalState.update(USER_WANTS_ENABLED_KEY, userWantsEnabled);
     log(`  User intent updated: userWantsEnabled = ${userWantsEnabled}`);
