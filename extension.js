@@ -368,9 +368,32 @@ async function checkEnvironmentAndStart() {
 
 async function handleToggle(context) {
     log('=== handleToggle CALLED ===');
-    log(`  Previous userWantsEnabled: ${userWantsEnabled}`);
+    log(`  Previous userWantsEnabled: ${userWantsEnabled}, cdpAvailable: ${cdpAvailable}`);
 
     try {
+        // SPECIAL CASE: If we're in BLOCKED state (user wants ON but CDP unavailable),
+        // clicking should trigger setup flow, NOT toggle off
+        if (userWantsEnabled && !cdpAvailable) {
+            log('Auto Accept: In BLOCKED state. Triggering CDP setup instead of toggling off...');
+            if (relauncher) {
+                await relauncher.ensureCDPAndRelaunch();
+            }
+            // After setup attempt, re-check CDP availability
+            cdpAvailable = cdpHandler ? await cdpHandler.isCDPAvailable() : false;
+            if (cdpAvailable) {
+                // Now we can start running
+                await startPolling();
+                isRunning = true;
+                startStatsCollection(context);
+                incrementSessionCount(context);
+                log('Auto Accept: CDP now available. Running.');
+            }
+            updateStatusBar();
+            log('=== handleToggle COMPLETE (BLOCKED -> setup) ===');
+            return;
+        }
+
+        // NORMAL CASE: Toggle user intent
         // 1. Toggle user intent UNCONDITIONALLY - this is the user's choice
         userWantsEnabled = !userWantsEnabled;
         await context.globalState.update(USER_WANTS_ENABLED_KEY, userWantsEnabled);
