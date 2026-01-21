@@ -1,0 +1,9 @@
+{
+    "ext.displayName": "Auto Accept Agent",
+    "ext.description": "Auto Accept Agent: Automated Cursor and Antigravity workflow with Pro recovery tools.",
+    "cmd.toggle": "Auto Accept: Toggle ON/OFF",
+    "cmd.toggleBackground": "Auto Accept: Toggle Background Mode",
+    "cmd.openSettings": "Auto Accept: Settings & Pro",
+    "config.cdpPort.description": "Chrome DevTools Protocol port. Set to null to auto-detect from parent process --remote-debugging-port. If detection fails, ports 8997-9003 will be scanned.",
+    "config.localVipOverride.description": "Force local VIP mode (for testing). Skips online license verification when enabled."
+}

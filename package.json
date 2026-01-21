@@ -1,8 +1,8 @@
 {
     "name": "auto-accept-agent",
-    "displayName": "Auto Accept Agent",
-    "description": "Auto Accept Agent: Automated Cursor and Antigravity workflow with Pro recovery tools.",
-    "version": "8.5.9",
+    "displayName": "%ext.displayName%",
+    "description": "%ext.description%",
+    "version": "8.6.0",
     "publisher": "MunKhin",
     "icon": "media/icon.png",
     "repository": {
@@ -31,19 +31,20 @@
         "onStartupFinished"
     ],
     "main": "dist/extension.js",
+    "l10n": "./l10n",
     "contributes": {
         "commands": [
             {
                 "command": "auto-accept.toggle",
-                "title": "Auto Accept: Toggle ON/OFF"
+                "title": "%cmd.toggle%"
             },
             {
                 "command": "auto-accept.toggleBackground",
-                "title": "Auto Accept: Toggle Background Mode"
+                "title": "%cmd.toggleBackground%"
             },
             {
                 "command": "auto-accept.openSettings",
-                "title": "Auto Accept: Settings & Pro"
+                "title": "%cmd.openSettings%"
             }
         ],
         "configuration": {
@@ -55,12 +56,12 @@
                         "null"
                     ],
                     "default": null,
-                    "description": "Chrome DevTools Protocol 端口。设置为 null 时会自动从父进程检测 --remote-debugging-port，如果检测失败则扫描 8997-9003 端口范围。"
+                    "description": "%config.cdpPort.description%"
                 },
                 "autoAccept.localVipOverride": {
                     "type": "boolean",
                     "default": false,
-                    "description": "本地强制 VIP 模式（测试用）。开启后跳过在线许可证验证。"
+                    "description": "%config.localVipOverride.description%"
                 }
             }
         }

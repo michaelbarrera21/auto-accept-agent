@@ -1,0 +1,9 @@
+{
+    "ext.displayName": "Auto Accept Agent",
+    "ext.description": "Auto Accept Agent：自动化 Cursor 和 Antigravity 工作流，含 Pro 恢复工具。",
+    "cmd.toggle": "Auto Accept：开启/关闭",
+    "cmd.toggleBackground": "Auto Accept：切换后台模式",
+    "cmd.openSettings": "Auto Accept：设置 & Pro",
+    "config.cdpPort.description": "Chrome DevTools Protocol 端口。设置为 null 时会自动从父进程检测 --remote-debugging-port，如果检测失败则扫描 8997-9003 端口范围。",
+    "config.localVipOverride.description": "本地强制 VIP 模式（测试用）。开启后跳过在线许可证验证。"
+}

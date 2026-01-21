@@ -75,6 +75,32 @@ The extension runs silently. Check the status bar for `Auto Accept: ON`.
 
 ---
 
+## Troubleshooting
+
+### "Could not configure automatically" Error
+
+**Symptom**: When clicking `Auto Accept: OFF`, you see:
+```
+Auto Accept: Could not configure automatically. Please add --remote-debugging-port=9000 to your Antigravity shortcut manually, then restart.
+```
+
+**Causes**:
+1. The shortcut is not in a standard location (Desktop, Start Menu, Taskbar)
+2. No write permission to the shortcut file
+3. IDE was installed via non-standard method (portable, custom path)
+4. Custom-named shortcuts that don't match the IDE executable
+
+**Manual Fix**:
+1. Find your IDE shortcut (Desktop or Start Menu)
+2. Right-click → **Properties**
+3. In the **Target** field, add `--remote-debugging-port=9000` after the `.exe` path:
+   ```
+   "C:\...\Antigravity.exe" --remote-debugging-port=9000
+   ```
+4. Click **OK** and restart the IDE
+
+---
+
 ## Requirements
 
 - Antigravity or Cursor IDE

@@ -85,6 +85,32 @@ Auto Accept 消除等待：
 
 ---
 
+## 故障排除
+
+### "无法自动配置" 错误
+
+**症状**：点击 `Auto Accept: OFF` 时，看到：
+```
+Auto Accept: 无法自动配置。请手动在 Antigravity 快捷方式中添加 --remote-debugging-port=9000，然后重启。
+```
+
+**常见原因**：
+1. 快捷方式不在标准位置（桌面、开始菜单、任务栏）
+2. 没有快捷方式文件的写入权限
+3. IDE 以非标准方式安装（便携版、自定义路径）
+4. 自定义命名的快捷方式与 IDE 可执行文件不匹配
+
+**手动修复**：
+1. 找到你的 IDE 快捷方式（桌面或开始菜单）
+2. 右键点击 → **属性**
+3. 在 **目标** 字段中，在 `.exe` 路径后添加 `--remote-debugging-port=9000`：
+   ```
+   "C:\...\Antigravity.exe" --remote-debugging-port=9000
+   ```
+4. 点击 **确定** 并重启 IDE
+
+---
+
 ## 系统要求
 
 - Antigravity 或 Cursor IDE
