@@ -4545,14 +4545,26 @@ var require_cdp_handler = __commonJS({
         return null;
       }
       /**
-       * Get the remote-debugging-port from parent process command line (Windows only)
-       * Uses synchronous execSync for simplicity since this runs once at startup
+       * Get the remote-debugging-port from parent process command line
+       * Cross-platform implementation: Windows, macOS, Linux
        */
       _getParentProcessPort() {
-        if (process.platform !== "win32") {
-          this.log("Parent process detection: Not Windows, skipping");
-          return null;
+        switch (process.platform) {
+          case "win32":
+            return this._getParentProcessPortWindows();
+          case "darwin":
+            return this._getParentProcessPortMacOS();
+          case "linux":
+            return this._getParentProcessPortLinux();
+          default:
+            this.log(`Parent process detection: Unsupported platform ${process.platform}`);
+            return null;
         }
+      }
+      /**
+       * Windows: Use PowerShell + WMI to traverse process tree
+       */
+      _getParentProcessPortWindows() {
         try {
           const { execSync } = require("child_process");
           const os = require("os");
@@ -4562,13 +4574,13 @@ var require_cdp_handler = __commonJS({
             this.log("Parent process detection: Cannot get parent PID");
             return null;
           }
-          this.log(`Parent process detection: Current PID=${process.pid}, Parent PID=${ppid}`);
+          this.log(`Parent process detection [Windows]: Current PID=${process.pid}, Parent PID=${ppid}`);
           const scriptContent = `$current = ${ppid}
 for ($i = 0; $i -lt 10; $i++) {
     try {
         $proc = Get-CimInstance Win32_Process -Filter "ProcessId = $current" -ErrorAction SilentlyContinue
         if ($proc -and $proc.CommandLine) {
-            if ($proc.CommandLine -match '--remote-debugging-port=(\\d+)') {
+            if ($proc.CommandLine -match '--remote-debugging-port=(\\\\d+)') {
                 Write-Output $Matches[1]
                 exit 0
             }
@@ -4591,7 +4603,7 @@ for ($i = 0; $i -lt 10; $i++) {
               timeout: 5e3,
               windowsHide: true
             }).trim();
-            this.log(`Parent process detection: PowerShell result = "${result}"`);
+            this.log(`Parent process detection [Windows]: PowerShell result = "${result}"`);
             if (result && /^\d+$/.test(result)) {
               return parseInt(result, 10);
             }
@@ -4602,7 +4614,79 @@ for ($i = 0; $i -lt 10; $i++) {
             }
           }
         } catch (e) {
-          this.log(`Parent process detection failed: ${e.message}`);
+          this.log(`Parent process detection [Windows] failed: ${e.message}`);
+        }
+        return null;
+      }
+      /**
+       * macOS: Use 'ps' command to read parent process command line
+       */
+      _getParentProcessPortMacOS() {
+        try {
+          const { execSync } = require("child_process");
+          let ppid = process.ppid;
+          if (!ppid) {
+            this.log("Parent process detection [macOS]: Cannot get parent PID");
+            return null;
+          }
+          this.log(`Parent process detection [macOS]: Current PID=${process.pid}, Parent PID=${ppid}`);
+          for (let i = 0; i < 10 && ppid > 1; i++) {
+            try {
+              const cmd = execSync(`ps -p ${ppid} -o args=`, {
+                encoding: "utf8",
+                timeout: 2e3
+              }).trim();
+              this.log(`Parent process detection [macOS]: PID ${ppid} args = "${cmd.substring(0, 100)}..."`);
+              const match = cmd.match(/--remote-debugging-port[=\s]+(\d+)/);
+              if (match) {
+                const port = parseInt(match[1], 10);
+                this.log(`Parent process detection [macOS]: Found port ${port}`);
+                return port;
+              }
+              const ppidResult = execSync(`ps -p ${ppid} -o ppid=`, {
+                encoding: "utf8"
+              }).trim();
+              ppid = parseInt(ppidResult, 10);
+            } catch (e) {
+              break;
+            }
+          }
+        } catch (e) {
+          this.log(`Parent process detection [macOS] failed: ${e.message}`);
+        }
+        return null;
+      }
+      /**
+       * Linux: Use /proc/[pid]/cmdline filesystem
+       */
+      _getParentProcessPortLinux() {
+        try {
+          let ppid = process.ppid;
+          if (!ppid) {
+            this.log("Parent process detection [Linux]: Cannot get parent PID");
+            return null;
+          }
+          this.log(`Parent process detection [Linux]: Current PID=${process.pid}, Parent PID=${ppid}`);
+          for (let i = 0; i < 10 && ppid > 1; i++) {
+            const cmdlinePath = `/proc/${ppid}/cmdline`;
+            if (!fs.existsSync(cmdlinePath)) break;
+            const cmdline = fs.readFileSync(cmdlinePath, "utf8").replace(/\0/g, " ");
+            this.log(`Parent process detection [Linux]: PID ${ppid} cmdline = "${cmdline.substring(0, 100)}..."`);
+            const match = cmdline.match(/--remote-debugging-port[=\s]+(\d+)/);
+            if (match) {
+              const port = parseInt(match[1], 10);
+              this.log(`Parent process detection [Linux]: Found port ${port}`);
+              return port;
+            }
+            const statPath = `/proc/${ppid}/stat`;
+            if (!fs.existsSync(statPath)) break;
+            const stat = fs.readFileSync(statPath, "utf8");
+            const statMatch = stat.match(/\d+ \([^)]+\) \w+ (\d+)/);
+            if (!statMatch) break;
+            ppid = parseInt(statMatch[1], 10);
+          }
+        } catch (e) {
+          this.log(`Parent process detection [Linux] failed: ${e.message}`);
         }
         return null;
       }
@@ -5232,7 +5316,8 @@ function getSettingsPanel() {
   }
   return SettingsPanel;
 }
-var GLOBAL_STATE_KEY = "auto-accept-enabled-global";
+var USER_WANTS_ENABLED_KEY = "auto-accept-user-wants-enabled";
+var LEGACY_ENABLED_KEY = "auto-accept-enabled-global";
 var PRO_STATE_KEY = "auto-accept-isPro";
 var FREQ_STATE_KEY = "auto-accept-frequency";
 var BANNED_COMMANDS_KEY = "auto-accept-banned-commands";
@@ -5241,7 +5326,9 @@ var SECONDS_PER_CLICK = 5;
 var LICENSE_API = "https://auto-accept-backend.onrender.com/api";
 var PENDING_ENABLE_KEY = "auto-accept-pending-enable";
 var INSTANCE_ID = Math.random().toString(36).substring(7);
-var isEnabled = false;
+var userWantsEnabled = false;
+var cdpAvailable = false;
+var isRunning = false;
 var isPro = false;
 var isLockedOut = false;
 var pollFrequency = 2e3;
@@ -5275,6 +5362,17 @@ function detectIDE() {
   if (appName.toLowerCase().includes("antigravity")) return "Antigravity";
   return "Code";
 }
+async function migrateOldState(context) {
+  const newValue = context.globalState.get(USER_WANTS_ENABLED_KEY);
+  if (newValue !== void 0) {
+    return;
+  }
+  const legacyValue = context.globalState.get(LEGACY_ENABLED_KEY, false);
+  if (legacyValue) {
+    log(`Migrating legacy state: ${LEGACY_ENABLED_KEY}=${legacyValue} -> ${USER_WANTS_ENABLED_KEY}`);
+    await context.globalState.update(USER_WANTS_ENABLED_KEY, legacyValue);
+  }
+}
 async function activate(context) {
   globalContext = context;
   Loc.init(context);
@@ -5302,13 +5400,14 @@ async function activate(context) {
     console.error("CRITICAL: Failed to create status bar items:", sbError);
   }
   try {
-    isEnabled = context.globalState.get(GLOBAL_STATE_KEY, false);
+    await migrateOldState(context);
+    userWantsEnabled = context.globalState.get(USER_WANTS_ENABLED_KEY, false);
     isPro = context.globalState.get(PRO_STATE_KEY, false);
     const pendingEnable = context.globalState.get(PENDING_ENABLE_KEY, false);
     if (pendingEnable) {
       vscode.window.showInformationMessage(`${Loc.t("Pending enable flag detected - auto-enabling Auto Accept")}`);
-      isEnabled = true;
-      context.globalState.update(GLOBAL_STATE_KEY, true);
+      userWantsEnabled = true;
+      context.globalState.update(USER_WANTS_ENABLED_KEY, true);
       context.globalState.update(PENDING_ENABLE_KEY, false);
     }
     const config = vscode.workspace.getConfiguration("autoAccept");
@@ -5440,9 +5539,9 @@ async function activate(context) {
 async function ensureCDPOrPrompt(showPrompt = false) {
   if (!cdpHandler) return false;
   log("Checking for active CDP session...");
-  const cdpAvailable = await cdpHandler.isCDPAvailable();
-  log(`Environment check: CDP Available = ${cdpAvailable}`);
-  if (cdpAvailable) {
+  const cdpAvailable2 = await cdpHandler.isCDPAvailable();
+  log(`Environment check: CDP Available = ${cdpAvailable2}`);
+  if (cdpAvailable2) {
     log("CDP is active and available.");
     return true;
   } else {
@@ -5455,45 +5554,48 @@ async function ensureCDPOrPrompt(showPrompt = false) {
   }
 }
 async function checkEnvironmentAndStart() {
-  if (isEnabled) {
-    log("Initializing Auto Accept environment...");
-    const cdpReady = await ensureCDPOrPrompt(false);
-    if (!cdpReady) {
-      log("Auto Accept was enabled but CDP is not available. Resetting to OFF state.");
-      isEnabled = false;
-      await globalContext.globalState.update(GLOBAL_STATE_KEY, false);
-    } else {
-      await startPolling();
-      startStatsCollection(globalContext);
-    }
+  cdpAvailable = await ensureCDPOrPrompt(false);
+  if (userWantsEnabled && cdpAvailable) {
+    log("User wants enabled and CDP available. Starting polling...");
+    await startPolling();
+    isRunning = true;
+    startStatsCollection(globalContext);
+  } else if (userWantsEnabled && !cdpAvailable) {
+    log("User wants enabled but CDP unavailable. Status: BLOCKED.");
+    isRunning = false;
+  } else {
+    log("User wants disabled. Remaining off.");
+    isRunning = false;
   }
   updateStatusBar();
 }
 async function handleToggle(context) {
   log("=== handleToggle CALLED ===");
-  log(`  Previous isEnabled: ${isEnabled}`);
+  log(`  Previous userWantsEnabled: ${userWantsEnabled}`);
   try {
-    log("handleToggle: Checking CDP availability...");
-    const cdpAvailable = cdpHandler ? await cdpHandler.isCDPAvailable() : false;
-    log(`handleToggle: cdpAvailable = ${cdpAvailable}`);
-    if (!isEnabled && !cdpAvailable && relauncher) {
-      log("Auto Accept: CDP not available. Prompting for setup/relaunch.");
-      await relauncher.ensureCDPAndRelaunch();
-      return;
-    }
-    isEnabled = !isEnabled;
-    log(`  New isEnabled: ${isEnabled}`);
-    await context.globalState.update(GLOBAL_STATE_KEY, isEnabled);
-    log(`  GlobalState updated`);
-    log("  Calling updateStatusBar...");
+    userWantsEnabled = !userWantsEnabled;
+    await context.globalState.update(USER_WANTS_ENABLED_KEY, userWantsEnabled);
+    log(`  User intent updated: userWantsEnabled = ${userWantsEnabled}`);
     updateStatusBar();
-    if (isEnabled) {
-      log("Auto Accept: Enabled");
-      ensureCDPOrPrompt(true).then(() => startPolling());
-      startStatsCollection(context);
-      incrementSessionCount(context);
+    if (userWantsEnabled) {
+      log("Auto Accept: User enabled. Checking CDP...");
+      cdpAvailable = cdpHandler ? await cdpHandler.isCDPAvailable() : false;
+      if (cdpAvailable) {
+        await startPolling();
+        isRunning = true;
+        startStatsCollection(context);
+        incrementSessionCount(context);
+        log("Auto Accept: Running.");
+      } else {
+        isRunning = false;
+        log("Auto Accept: CDP not available. Triggering setup...");
+        if (relauncher) {
+          await relauncher.ensureCDPAndRelaunch();
+        }
+      }
     } else {
-      log("Auto Accept: Disabled");
+      log("Auto Accept: User disabled.");
+      isRunning = false;
       if (cdpHandler) {
         cdpHandler.getSessionSummary().then((summary) => showSessionSummaryNotification(context, summary)).catch(() => {
         });
@@ -5503,6 +5605,7 @@ async function handleToggle(context) {
       stopPolling().catch(() => {
       });
     }
+    updateStatusBar();
     log("=== handleToggle COMPLETE ===");
   } catch (e) {
     log(`Error toggling: ${e.message}`);
@@ -5808,8 +5911,21 @@ function startStatsCollection(context) {
 }
 function updateStatusBar() {
   if (!statusBarItem) return;
-  if (isEnabled) {
-    let statusText = "ON";
+  if (!userWantsEnabled) {
+    statusBarItem.text = `$(circle-slash) ${Loc.t("Auto Accept: OFF")}`;
+    statusBarItem.tooltip = Loc.t("Click to enable Auto Accept.");
+    statusBarItem.backgroundColor = new vscode.ThemeColor("statusBarItem.warningBackground");
+    if (statusBackgroundItem) {
+      statusBackgroundItem.hide();
+    }
+  } else if (!cdpAvailable) {
+    statusBarItem.text = `$(debug-disconnect) ${Loc.t("Auto Accept: BLOCKED")}`;
+    statusBarItem.tooltip = Loc.t("Auto Accept is enabled but cannot connect. Click to configure.");
+    statusBarItem.backgroundColor = new vscode.ThemeColor("statusBarItem.errorBackground");
+    if (statusBackgroundItem) {
+      statusBackgroundItem.hide();
+    }
+  } else {
     let tooltip = Loc.t("Auto Accept is running.");
     let bgColor = void 0;
     let icon = "$(check)";
@@ -5837,13 +5953,6 @@ function updateStatusBar() {
         statusBackgroundItem.backgroundColor = void 0;
       }
       statusBackgroundItem.show();
-    }
-  } else {
-    statusBarItem.text = `$(circle-slash) ${Loc.t("Auto Accept: OFF")}`;
-    statusBarItem.tooltip = Loc.t("Click to enable Auto Accept.");
-    statusBarItem.backgroundColor = new vscode.ThemeColor("statusBarItem.warningBackground");
-    if (statusBackgroundItem) {
-      statusBackgroundItem.hide();
     }
   }
 }

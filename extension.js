@@ -18,7 +18,9 @@ function getSettingsPanel() {
 
 // states
 
-const GLOBAL_STATE_KEY = 'auto-accept-enabled-global';
+// NEW: Separated user intent from system capability
+const USER_WANTS_ENABLED_KEY = 'auto-accept-user-wants-enabled'; // User's preference (persisted)
+const LEGACY_ENABLED_KEY = 'auto-accept-enabled-global'; // For migration
 const PRO_STATE_KEY = 'auto-accept-isPro';
 const FREQ_STATE_KEY = 'auto-accept-frequency';
 const BANNED_COMMANDS_KEY = 'auto-accept-banned-commands';
@@ -31,7 +33,13 @@ const HEARTBEAT_KEY = 'auto-accept-instance-heartbeat';
 const PENDING_ENABLE_KEY = 'auto-accept-pending-enable'; // Auto-enable after restart
 const INSTANCE_ID = Math.random().toString(36).substring(7);
 
-let isEnabled = false;
+// NEW STATE MODEL:
+// userWantsEnabled: User's preference (persisted) - only changes when user clicks toggle
+// cdpAvailable: System capability (runtime) - whether CDP connection is possible
+// isRunning: Actual runtime state - whether polling is active
+let userWantsEnabled = false; // User's preference
+let cdpAvailable = false;     // System capability (runtime only)
+let isRunning = false;        // Actual running state (runtime only)
 let isPro = false;
 let isLockedOut = false; // Local tracking
 let pollFrequency = 2000; // Default for Free
@@ -74,6 +82,26 @@ function detectIDE() {
     return 'Code'; // only supporting these 3 for now
 }
 
+/**
+ * Migrate from legacy state key to new key
+ * This ensures users don't lose their preference when updating
+ */
+async function migrateOldState(context) {
+    // Check if new key already has a value
+    const newValue = context.globalState.get(USER_WANTS_ENABLED_KEY);
+    if (newValue !== undefined) {
+        // Already migrated
+        return;
+    }
+
+    // Check legacy key
+    const legacyValue = context.globalState.get(LEGACY_ENABLED_KEY, false);
+    if (legacyValue) {
+        log(`Migrating legacy state: ${LEGACY_ENABLED_KEY}=${legacyValue} -> ${USER_WANTS_ENABLED_KEY}`);
+        await context.globalState.update(USER_WANTS_ENABLED_KEY, legacyValue);
+    }
+}
+
 async function activate(context) {
     globalContext = context;
     Loc.init(context);
@@ -109,16 +137,17 @@ async function activate(context) {
     }
 
     try {
-        // 1. Initialize State
-        isEnabled = context.globalState.get(GLOBAL_STATE_KEY, false);
+        // 1. Initialize State - NEW: Migrate from legacy key if needed
+        await migrateOldState(context);
+        userWantsEnabled = context.globalState.get(USER_WANTS_ENABLED_KEY, false);
         isPro = context.globalState.get(PRO_STATE_KEY, false);
 
         // Check for pending auto-enable (set after shortcut modification)
         const pendingEnable = context.globalState.get(PENDING_ENABLE_KEY, false);
         if (pendingEnable) {
             vscode.window.showInformationMessage(`${Loc.t('Pending enable flag detected - auto-enabling Auto Accept')}`);
-            isEnabled = true;
-            context.globalState.update(GLOBAL_STATE_KEY, true);
+            userWantsEnabled = true;
+            context.globalState.update(USER_WANTS_ENABLED_KEY, true);
             context.globalState.update(PENDING_ENABLE_KEY, false);
         }
 
@@ -314,73 +343,81 @@ async function ensureCDPOrPrompt(showPrompt = false) {
 }
 
 async function checkEnvironmentAndStart() {
-    if (isEnabled) {
-        log('Initializing Auto Accept environment...');
-        const cdpReady = await ensureCDPOrPrompt(false);
+    // NEW STATE MODEL: Check CDP capability but NEVER modify userWantsEnabled
+    cdpAvailable = await ensureCDPOrPrompt(false);
 
-        if (!cdpReady) {
-            // CDP not available - reset to OFF state so user can trigger setup via toggle
-            log('Auto Accept was enabled but CDP is not available. Resetting to OFF state.');
-            isEnabled = false;
-            await globalContext.globalState.update(GLOBAL_STATE_KEY, false);
-        } else {
-            await startPolling();
-            // Start stats collection if already enabled on startup
-            startStatsCollection(globalContext);
-        }
+    if (userWantsEnabled && cdpAvailable) {
+        // User wants ON and system supports it -> Start running
+        log('User wants enabled and CDP available. Starting polling...');
+        await startPolling();
+        isRunning = true;
+        startStatsCollection(globalContext);
+    } else if (userWantsEnabled && !cdpAvailable) {
+        // User wants ON but system doesn't support -> BLOCKED state
+        // CRITICAL: Do NOT modify userWantsEnabled - preserve user intent!
+        log('User wants enabled but CDP unavailable. Status: BLOCKED.');
+        isRunning = false;
+    } else {
+        // User wants OFF -> remain off
+        log('User wants disabled. Remaining off.');
+        isRunning = false;
     }
+
     updateStatusBar();
 }
 
 async function handleToggle(context) {
     log('=== handleToggle CALLED ===');
-    log(`  Previous isEnabled: ${isEnabled}`);
+    log(`  Previous userWantsEnabled: ${userWantsEnabled}`);
 
     try {
-        // Check CDP availability first
-        log('handleToggle: Checking CDP availability...');
-        const cdpAvailable = cdpHandler ? await cdpHandler.isCDPAvailable() : false;
-        log(`handleToggle: cdpAvailable = ${cdpAvailable}`);
+        // 1. Toggle user intent UNCONDITIONALLY - this is the user's choice
+        userWantsEnabled = !userWantsEnabled;
+        await context.globalState.update(USER_WANTS_ENABLED_KEY, userWantsEnabled);
+        log(`  User intent updated: userWantsEnabled = ${userWantsEnabled}`);
 
-        // If trying to enable but CDP not available, prompt for relaunch (don't change state)
-        if (!isEnabled && !cdpAvailable && relauncher) {
-            log('Auto Accept: CDP not available. Prompting for setup/relaunch.');
-            await relauncher.ensureCDPAndRelaunch();
-            return; // Don't change state - toggle stays OFF
-        }
-
-        isEnabled = !isEnabled;
-        log(`  New isEnabled: ${isEnabled}`);
-
-        // Update state and UI IMMEDIATELY (non-blocking)
-        await context.globalState.update(GLOBAL_STATE_KEY, isEnabled);
-        log(`  GlobalState updated`);
-
-        log('  Calling updateStatusBar...');
+        // 2. Update UI immediately to reflect user's choice
         updateStatusBar();
 
-        // Do CDP operations in background (don't block toggle)
-        if (isEnabled) {
-            log('Auto Accept: Enabled');
-            // These operations happen in background
-            ensureCDPOrPrompt(true).then(() => startPolling());
-            startStatsCollection(context);
-            incrementSessionCount(context);
-        } else {
-            log('Auto Accept: Disabled');
+        // 3. If user wants enabled, check system capability
+        if (userWantsEnabled) {
+            log('Auto Accept: User enabled. Checking CDP...');
+            cdpAvailable = cdpHandler ? await cdpHandler.isCDPAvailable() : false;
 
-            // Fire-and-forget: Show session summary notification (non-blocking)
+            if (cdpAvailable) {
+                // System supports it -> start running
+                await startPolling();
+                isRunning = true;
+                startStatsCollection(context);
+                incrementSessionCount(context);
+                log('Auto Accept: Running.');
+            } else {
+                // System doesn't support -> trigger setup, stay in BLOCKED state
+                isRunning = false;
+                log('Auto Accept: CDP not available. Triggering setup...');
+                if (relauncher) {
+                    await relauncher.ensureCDPAndRelaunch();
+                }
+            }
+        } else {
+            // User disabled -> stop everything
+            log('Auto Accept: User disabled.');
+            isRunning = false;
+
+            // Fire-and-forget: Show session summary notification
             if (cdpHandler) {
                 cdpHandler.getSessionSummary()
                     .then(summary => showSessionSummaryNotification(context, summary))
                     .catch(() => { });
             }
 
-            // Fire-and-forget: collect stats and stop in background
+            // Fire-and-forget: collect stats and stop
             collectAndSaveStats(context).catch(() => { });
             stopPolling().catch(() => { });
         }
 
+        // Update status bar again after operations
+        updateStatusBar();
         log('=== handleToggle COMPLETE ===');
     } catch (e) {
         log(`Error toggling: ${e.message}`);
@@ -799,8 +836,29 @@ function startStatsCollection(context) {
 function updateStatusBar() {
     if (!statusBarItem) return;
 
-    if (isEnabled) {
-        let statusText = 'ON';
+    // NEW STATE MODEL: Three states - OFF, BLOCKED, ON
+    if (!userWantsEnabled) {
+        // User wants OFF -> show OFF
+        statusBarItem.text = `$(circle-slash) ${Loc.t('Auto Accept: OFF')}`;
+        statusBarItem.tooltip = Loc.t('Click to enable Auto Accept.');
+        statusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
+
+        // Hide Background Mode toggle when Auto Accept is OFF
+        if (statusBackgroundItem) {
+            statusBackgroundItem.hide();
+        }
+    } else if (!cdpAvailable) {
+        // User wants ON but CDP unavailable -> BLOCKED
+        statusBarItem.text = `$(debug-disconnect) ${Loc.t('Auto Accept: BLOCKED')}`;
+        statusBarItem.tooltip = Loc.t('Auto Accept is enabled but cannot connect. Click to configure.');
+        statusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.errorBackground');
+
+        // Hide Background Mode toggle when BLOCKED
+        if (statusBackgroundItem) {
+            statusBackgroundItem.hide();
+        }
+    } else {
+        // User wants ON and CDP available -> ON
         let tooltip = Loc.t('Auto Accept is running.');
         let bgColor = undefined;
         let icon = '$(check)';
@@ -834,16 +892,6 @@ function updateStatusBar() {
                 statusBackgroundItem.backgroundColor = undefined;
             }
             statusBackgroundItem.show();
-        }
-
-    } else {
-        statusBarItem.text = `$(circle-slash) ${Loc.t('Auto Accept: OFF')}`;
-        statusBarItem.tooltip = Loc.t('Click to enable Auto Accept.');
-        statusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
-
-        // Hide Background Mode toggle when Auto Accept is OFF
-        if (statusBackgroundItem) {
-            statusBackgroundItem.hide();
         }
     }
 }

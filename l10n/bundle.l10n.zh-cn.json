@@ -72,5 +72,7 @@
     "REF:": "REF:",
     "Start {0} Auto Accept": "启动{0} Auto Accept",
     "Created \"{0}.app\" on your Desktop. Use this to start the IDE with automation enabled.": "已在桌面创建 \"{0}.app\"。请使用它来启动支持自动化的 IDE。",
-    "Updated start menu entry for {0}. You may need to relogin for changes to take effect.": "已更新 {0} 的开始菜单项。您可能需要重新登录才能生效。"
+    "Updated start menu entry for {0}. You may need to relogin for changes to take effect.": "已更新 {0} 的开始菜单项。您可能需要重新登录才能生效。",
+    "Auto Accept: BLOCKED": "Auto Accept: 已阻止",
+    "Auto Accept is enabled but cannot connect. Click to configure.": "Auto Accept 已启用但无法连接。点击配置。"
 }
