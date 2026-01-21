@@ -1,10 +1,10 @@
 # Auto Accept for Antigravity
 
-**English** | [中文](README_CN.md)
+[English](README_EN.md) | **中文**
 
-## Run 3 AI agents in parallel. Zero babysitting.
+## 同时运行 3 个 AI 代理，无需人工干预
 
-Stop watching tabs. Auto Accept keeps every Antigravity conversation moving — accepting file edits, terminal commands, and recovery prompts automatically.
+不再盯着标签页。Auto Accept 让每个 Antigravity 对话自动进行 — 自动接受文件编辑、终端命令和恢复提示。
 
 ---
 
@@ -12,128 +12,138 @@ Stop watching tabs. Auto Accept keeps every Antigravity conversation moving — 
 
 ---
 
-## Why Auto Accept?
+## 为什么选择 Auto Accept？
 
-Antigravity's multi-agent workflow is powerful, but it stops every time the agent needs approval. 
+Antigravity 的多代理工作流程很强大，但每当代理需要批准时就会停下来。
 
-**That's dozens of interruptions per hour.**
+**每小时数十次中断。**
 
-Auto Accept eliminates the wait:
-- ✅ **File edits** — Auto-applied
-- ✅ **Terminal commands** — Auto-executed
-- ✅ **Retry prompts** — Auto-confirmed
-- ✅ **Stuck agents** — Auto-recovered
+Auto Accept 消除等待：
+- ✅ **文件编辑** — 自动应用
+- ✅ **终端命令** — 自动执行
+- ✅ **重试提示** — 自动确认
+- ✅ **卡住的代理** — 自动恢复
 
 ---
 
-## Features
+## 功能特性
 
-### Background Mode (Pro)
-Run multiple Antigravity tabs simultaneously. Every conversation auto-accepts in the background — no tab-switching required.
+### 后台模式 (Pro)
+同时运行多个 Antigravity 标签页。所有对话在后台自动接受 — 无需切换标签页。
 
-### Dangerous Command Blocking
-Built-in protection against destructive commands like `rm -rf /`. Pro users can customize the blocklist.
+### 危险命令拦截
+内置保护，阻止破坏性命令如 `rm -rf /`。Pro 用户可自定义拦截列表。
 
-### Real-time Status Overlay
-Visual indicators show conversation state:
-- **Purple** — In progress, actively polling
-- **Green** — Task completed
+### 实时状态指示
+可视化指示器显示对话状态：
+- **紫色** — 进行中，正在轮询
+- **绿色** — 任务完成
 
-### Works Everywhere
+### 全平台支持
 - ✅ Antigravity
 - ✅ Cursor
-- ✅ Multiple windows
-- ✅ Minimized/unfocused
-- ✅ Multi-instance (Smart Port Detection)
+- ✅ 多窗口
+- ✅ 最小化/失焦状态
+- ✅ 多实例（智能端口检测）
 
-### Internationalization
-- 🇺🇸 **English** (Default)
-- 🇨🇳 **Simplified Chinese** (简体中文)
+### 多语言支持
+- 🇺🇸 **English**
+- 🇨🇳 **简体中文**
 
-Auto-detects IDE language. Force specific language via `Auto Accept: Language Override` setting.
-
----
-
-## Quick Start
-
-1. **Install** the extension
-2. **Click** `Auto Accept: OFF` in the status bar
-3. **Allow** the one-time shortcut update if prompted
-4. **Done** — Auto Accept activates automatically
-
-The extension runs silently. Check the status bar for `Auto Accept: ON`.
+插件会自动检测 IDE 语言。如需强制切换，请在设置中修改 `Auto Accept: Language Override`。
 
 ---
 
-## Pro Features
+## 快速开始
 
-| Feature | Free | Pro |
-|---------|------|-----|
-| Auto-accept in active tab | ✅ | ✅ |
-| Background mode (all tabs) | — | ✅ |
-| Custom banned commands | — | ✅ |
-| Adjustable polling speed | — | ✅ |
-| Stuck agent recovery | — | ✅ |
-| Stuck agent recovery | — | ✅ |
-| Multi-window support | — | ✅ |
-| Smart Port Detection | ✅ | ✅ |
+1. **安装** 扩展
+2. **点击** 状态栏中的 `Auto Accept: OFF`
+3. **允许** 一次性快捷方式更新（如有提示）
+4. **完成** — Auto Accept 自动激活
 
+扩展静默运行。查看状态栏确认 `Auto Accept: ON`。
 
 ---
 
-## Troubleshooting
+## 安装方法
 
-### "Could not configure automatically" Error
+### 从 GitHub Releases 安装
+1. 前往 [Releases 页面](https://github.com/michaelbarrera21/auto-accept-agent/releases)
+2. 下载最新的 `.vsix` 文件
+3. 打开 Antigravity / VS Code / Cursor
+4. 按 `Ctrl+Shift+P`，输入 `Install from VSIX`
+5. 选择下载的 `.vsix` 文件
+6. 重启 IDE
 
-**Symptom**: When clicking `Auto Accept: OFF`, you see:
+---
+
+## Pro 功能对比
+
+| 功能 | 免费版 | Pro |
+|------|--------|-----|
+| 当前标签页自动接受 | ✅ | ✅ |
+| 后台模式（所有标签页） | — | ✅ |
+| 自定义拦截命令 | — | ✅ |
+| 可调轮询速度 | — | ✅ |
+| 卡住代理恢复 | — | ✅ |
+| 多窗口支持 | — | ✅ |
+| 智能端口检测 | ✅ | ✅ |
+
+---
+
+## 故障排除
+
+### "无法自动配置" 错误
+
+**症状**：点击 `Auto Accept: OFF` 时，看到：
 ```
-Auto Accept: Could not configure automatically. Please add --remote-debugging-port=9000 to your Antigravity shortcut manually, then restart.
+Auto Accept: 无法自动配置。请手动在 Antigravity 快捷方式中添加 --remote-debugging-port=9000，然后重启。
 ```
 
-**Causes**:
-1. The shortcut is not in a standard location (Desktop, Start Menu, Taskbar)
-2. No write permission to the shortcut file
-3. IDE was installed via non-standard method (portable, custom path)
-4. Custom-named shortcuts that don't match the IDE executable
+**常见原因**：
+1. 快捷方式不在标准位置（桌面、开始菜单、任务栏）
+2. 没有快捷方式文件的写入权限
+3. IDE 以非标准方式安装（便携版、自定义路径）
+4. 自定义命名的快捷方式与 IDE 可执行文件不匹配
 
-**Manual Fix**:
+**手动修复**：
 
 #### Windows
-1. Find your IDE shortcut (Desktop or Start Menu)
-2. Right-click → **Properties**
-3. In the **Target** field, add `--remote-debugging-port=9000` after the `.exe` path:
+1. 找到你的 IDE 快捷方式（桌面或开始菜单）
+2. 右键点击 → **属性**
+3. 在 **目标** 字段中，在 `.exe` 路径后添加 `--remote-debugging-port=9000`：
    ```
    "C:\...\Antigravity.exe" --remote-debugging-port=9000
    ```
-4. Click **OK** and restart the IDE
+4. 点击 **确定** 并重启 IDE
 
 #### macOS
-Launch your IDE from the terminal with the debug flag:
+请通过终端使用参数启动 IDE：
 ```bash
-# For Antigravity
+# Antigravity
 open -a "Antigravity.app" --args --remote-debugging-port=9000
 
-# For Cursor
+# Cursor
 open -a "Cursor.app" --args --remote-debugging-port=9000
 ```
-*Tip: You can create an alias in your `.zshrc`: `alias antigravity='open -a "Antigravity" --args --remote-debugging-port=9000'`*
+*提示：您可以在 `.zshrc` 中创建别名：`alias antigravity='open -a "Antigravity" --args --remote-debugging-port=9000'`*
 
 #### Linux
-Edit your URL/Desktop entry (usually in `/usr/share/applications` or `~/.local/share/applications`):
-1. Open the `.desktop` file (e.g., `antigravity.desktop`)
-2. Find the `Exec=` line
-3. Append `--remote-debugging-port=9000` to the end
-4. Save and relaunch
+编辑您的 `.desktop` 启动文件（通常在 `/usr/share/applications` 或 `~/.local/share/applications`）：
+1. 打开 `.desktop` 文件 (例如 `antigravity.desktop`)
+2. 找到 `Exec=` 开头的那一行
+3. 在末尾添加 `--remote-debugging-port=9000`
+4. 保存并重启应用
 
 ---
 
-## Requirements
+## 系统要求
 
-- Antigravity or Cursor IDE
-- One-time relaunch after install
+- Antigravity 或 Cursor IDE
+- 安装后需重启一次
 
 ---
 
-## License
+## 许可证
 
 MIT
