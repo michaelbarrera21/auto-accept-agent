@@ -388,14 +388,12 @@ if ($modifiedList.Count -gt 0) {
 
     async _modifyMacOSShortcut() {
         const ideName = this.getIdeName();
-        const binDir = path.join(os.homedir(), '.local', 'bin');
-        if (!fs.existsSync(binDir)) fs.mkdirSync(binDir, { recursive: true });
+        // Target: Create a clickable .app on Desktop using osacompile
+        const destPath = path.join(os.homedir(), 'Desktop', `Launch ${ideName} (Debug).app`);
 
-        const wrapperPath = path.join(binDir, `${ideName.toLowerCase()} -cdp`);
-
-        // Search for the app in common locations
-        const locations = ['/Applications', path.join(os.homedir(), 'Applications')];
+        // Search for the app
         const appNames = [`${ideName}.app`, 'Cursor.app', 'Visual Studio Code.app'];
+        const locations = ['/Applications', path.join(os.homedir(), 'Applications')];
 
         let foundAppPath = '';
         for (const loc of locations) {
@@ -409,44 +407,81 @@ if ($modifiedList.Count -gt 0) {
             if (foundAppPath) break;
         }
 
-        if (!foundAppPath) return false;
+        if (!foundAppPath) {
+            this.log('Could not find IDE application bundle.');
+            return false;
+        }
 
-        const content = `#!/bin/bash\nopen - a "${foundAppPath}" --args--remote - debugging - port=9000 "$@"`;
-        fs.writeFileSync(wrapperPath, content, { mode: 0o755 });
-        this.log(`Created macOS wrapper at ${wrapperPath} for ${foundAppPath}`);
-        return true;
+        // Create AppleScript to launch the app with args
+        // Using 'do shell script' allows passing args cleanly via 'open'
+        const script = `do shell script "open -a \\"${foundAppPath}\\" --args --remote-debugging-port=9000"`;
+
+        try {
+            // Use osacompile to create a run-only applet
+            execSync(`osacompile -o "${destPath}" -e '${script}'`);
+            this.log(`Created macOS launcher at ${destPath}`);
+            vscode.window.showInformationMessage(
+                Loc.t('Created "Launch {0} (Debug).app" on your Desktop. Use this to start the IDE with automation enabled.', ideName)
+            );
+            return true;
+        } catch (e) {
+            this.log(`Error creating macOS launcher: ${e.message}`);
+            return false;
+        }
     }
 
     async _modifyLinuxShortcut() {
         const ideName = this.getIdeName().toLowerCase();
+        // Common Linux desktop entry locations
         const desktopDirs = [
             path.join(os.homedir(), '.local', 'share', 'applications'),
             '/usr/share/applications',
-            '/usr/local/share/applications'
+            '/var/lib/flatpak/exports/share/applications',
+            '/var/lib/snapd/desktop/applications'
         ];
 
         let modified = false;
+        // User-specific application dir (safe to write)
+        const userDir = path.join(os.homedir(), '.local', 'share', 'applications');
+        if (!fs.existsSync(userDir)) fs.mkdirSync(userDir, { recursive: true });
+
         for (const dir of desktopDirs) {
             if (!fs.existsSync(dir)) continue;
 
             const files = fs.readdirSync(dir).filter(f => f.endsWith('.desktop'));
             for (const file of files) {
-                if (file.includes(ideName) || file.includes('cursor')) {
-                    const p = path.join(dir, file);
+                // Heuristic to find relevant desktop files
+                if (file.toLowerCase().includes(ideName) || file.toLowerCase().includes('cursor') || file.toLowerCase().includes('code')) {
+                    const sourcePath = path.join(dir, file);
                     try {
-                        let content = fs.readFileSync(p, 'utf8');
-                        if (!content.includes('--remote-debugging-port=9000')) {
-                            content = content.replace(/^Exec=(.*)$/m, 'Exec=$1 --remote-debugging-port=9000');
+                        let content = fs.readFileSync(sourcePath, 'utf8');
 
-                            // Always write to user's local applications to avoid sudo issues
-                            const userDir = path.join(os.homedir(), '.local', 'share', 'applications');
-                            if (!fs.existsSync(userDir)) fs.mkdirSync(userDir, { recursive: true });
-
-                            const userPath = path.join(userDir, file);
-                            fs.writeFileSync(userPath, content);
-                            modified = true;
+                        // Check if already modified
+                        if (content.includes('--remote-debugging-port=9000')) {
+                            continue;
                         }
-                    } catch (e) { }
+
+                        // Regex to inject flag into Exec line
+                        // Handles: Exec=/path/to/code %F
+                        // Becomes: Exec=/path/to/code --remote-debugging-port=9000 %F
+                        // Also handles simple Exec=/path/to/code
+                        const execRegex = /^(Exec=.*?)(\s*%[fFuU].*)?$/m;
+
+                        if (execRegex.test(content)) {
+                            content = content.replace(execRegex, '$1 --remote-debugging-port=9000$2');
+
+                            // Save to user directory to override system defaults without root
+                            const destPath = path.join(userDir, file);
+                            fs.writeFileSync(destPath, content, { mode: 0o755 }); // Ensure executable
+                            this.log(`Created Linux override at ${destPath}`);
+                            modified = true;
+                            vscode.window.showInformationMessage(
+                                Loc.t('Updated start menu entry for {0}. You may need to relogin for changes to take effect.', ideName)
+                            );
+                        }
+                    } catch (e) {
+                        this.log(`Error processing ${file}: ${e.message}`);
+                    }
                 }
             }
         }

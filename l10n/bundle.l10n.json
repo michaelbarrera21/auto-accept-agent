@@ -69,5 +69,7 @@
     "Unlock Auto-Recovery — $5/mo": "Unlock Auto-Recovery — $5/mo",
     "Annual Plan — $29/year": "Annual Plan — $29/year",
     "Continue manually for now": "Continue manually for now",
-    "REF:": "REF:"
+    "REF:": "REF:",
+    "Created \"Launch {0} (Debug).app\" on your Desktop. Use this to start the IDE with automation enabled.": "Created \"Launch {0} (Debug).app\" on your Desktop. Use this to start the IDE with automation enabled.",
+    "Updated start menu entry for {0}. You may need to relogin for changes to take effect.": "Updated start menu entry for {0}. You may need to relogin for changes to take effect."
 }

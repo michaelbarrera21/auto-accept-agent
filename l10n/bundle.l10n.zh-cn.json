@@ -69,5 +69,7 @@
     "Unlock Auto-Recovery — $5/mo": "解锁自动恢复 — $5/月",
     "Annual Plan — $29/year": "年度计划 — $29/年",
     "Continue manually for now": "暂时手动继续",
-    "REF:": "REF:"
+    "REF:": "REF:",
+    "Created \"Launch {0} (Debug).app\" on your Desktop. Use this to start the IDE with automation enabled.": "已在桌面创建 \"启动 {0} (调试版).app\"。请使用它来启动支持自动化的 IDE。",
+    "Updated start menu entry for {0}. You may need to relogin for changes to take effect.": "已更新 {0} 的开始菜单项。您可能需要重新登录才能生效。"
 }

@@ -5128,11 +5128,9 @@ ${result}`);
       }
       async _modifyMacOSShortcut() {
         const ideName = this.getIdeName();
-        const binDir = path2.join(os.homedir(), ".local", "bin");
-        if (!fs.existsSync(binDir)) fs.mkdirSync(binDir, { recursive: true });
-        const wrapperPath = path2.join(binDir, `${ideName.toLowerCase()} -cdp`);
-        const locations = ["/Applications", path2.join(os.homedir(), "Applications")];
+        const destPath = path2.join(os.homedir(), "Desktop", `Launch ${ideName} (Debug).app`);
         const appNames = [`${ideName}.app`, "Cursor.app", "Visual Studio Code.app"];
+        const locations = ["/Applications", path2.join(os.homedir(), "Applications")];
         let foundAppPath = "";
         for (const loc of locations) {
           for (const name of appNames) {
@@ -5144,38 +5142,58 @@ ${result}`);
           }
           if (foundAppPath) break;
         }
-        if (!foundAppPath) return false;
-        const content = `#!/bin/bash
-open - a "${foundAppPath}" --args--remote - debugging - port=9000 "$@"`;
-        fs.writeFileSync(wrapperPath, content, { mode: 493 });
-        this.log(`Created macOS wrapper at ${wrapperPath} for ${foundAppPath}`);
-        return true;
+        if (!foundAppPath) {
+          this.log("Could not find IDE application bundle.");
+          return false;
+        }
+        const script = `do shell script "open -a \\"${foundAppPath}\\" --args --remote-debugging-port=9000"`;
+        try {
+          execSync(`osacompile -o "${destPath}" -e '${script}'`);
+          this.log(`Created macOS launcher at ${destPath}`);
+          vscode2.window.showInformationMessage(
+            Loc2.t('Created "Launch {0} (Debug).app" on your Desktop. Use this to start the IDE with automation enabled.', ideName)
+          );
+          return true;
+        } catch (e) {
+          this.log(`Error creating macOS launcher: ${e.message}`);
+          return false;
+        }
       }
       async _modifyLinuxShortcut() {
         const ideName = this.getIdeName().toLowerCase();
         const desktopDirs = [
           path2.join(os.homedir(), ".local", "share", "applications"),
           "/usr/share/applications",
-          "/usr/local/share/applications"
+          "/var/lib/flatpak/exports/share/applications",
+          "/var/lib/snapd/desktop/applications"
         ];
         let modified = false;
+        const userDir = path2.join(os.homedir(), ".local", "share", "applications");
+        if (!fs.existsSync(userDir)) fs.mkdirSync(userDir, { recursive: true });
         for (const dir of desktopDirs) {
           if (!fs.existsSync(dir)) continue;
           const files = fs.readdirSync(dir).filter((f) => f.endsWith(".desktop"));
           for (const file of files) {
-            if (file.includes(ideName) || file.includes("cursor")) {
-              const p = path2.join(dir, file);
+            if (file.toLowerCase().includes(ideName) || file.toLowerCase().includes("cursor") || file.toLowerCase().includes("code")) {
+              const sourcePath = path2.join(dir, file);
               try {
-                let content = fs.readFileSync(p, "utf8");
-                if (!content.includes("--remote-debugging-port=9000")) {
-                  content = content.replace(/^Exec=(.*)$/m, "Exec=$1 --remote-debugging-port=9000");
-                  const userDir = path2.join(os.homedir(), ".local", "share", "applications");
-                  if (!fs.existsSync(userDir)) fs.mkdirSync(userDir, { recursive: true });
-                  const userPath = path2.join(userDir, file);
-                  fs.writeFileSync(userPath, content);
+                let content = fs.readFileSync(sourcePath, "utf8");
+                if (content.includes("--remote-debugging-port=9000")) {
+                  continue;
+                }
+                const execRegex = /^(Exec=.*?)(\s*%[fFuU].*)?$/m;
+                if (execRegex.test(content)) {
+                  content = content.replace(execRegex, "$1 --remote-debugging-port=9000$2");
+                  const destPath = path2.join(userDir, file);
+                  fs.writeFileSync(destPath, content, { mode: 493 });
+                  this.log(`Created Linux override at ${destPath}`);
                   modified = true;
+                  vscode2.window.showInformationMessage(
+                    Loc2.t("Updated start menu entry for {0}. You may need to relogin for changes to take effect.", ideName)
+                  );
                 }
               } catch (e) {
+                this.log(`Error processing ${file}: ${e.message}`);
               }
             }
           }
