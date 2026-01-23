@@ -746,6 +746,7 @@
 
     // --- RETRY CIRCUIT BREAKER ---
     const MAX_CONSECUTIVE_RETRY_FAILURES = 5;
+    const RETRY_OBSERVATION_TIMEOUT = 10000; // 10 seconds to observe retry outcome
     let consecutiveRetryFailures = 0;
     let retryCircuitBroken = false;
 
@@ -768,6 +769,124 @@
                 timestamp: Date.now()
             };
         }
+    }
+
+    // Find the error container element that contains the retry button
+    function findErrorContainer(retryButton) {
+        // Look for common error container patterns
+        let el = retryButton;
+        for (let i = 0; i < 10 && el; i++) {
+            el = el.parentElement;
+            if (!el) break;
+
+            // Check for error indicators in the container
+            const hasErrorIcon = el.querySelector('svg[class*="error"], [class*="error-icon"], [class*="warning"]');
+            const hasErrorText = el.textContent?.includes('Error') || el.textContent?.includes('terminated');
+            const isLargeEnough = el.offsetHeight > 50;
+
+            if ((hasErrorIcon || hasErrorText) && isLargeEnough) {
+                return el;
+            }
+        }
+        // Fallback: return parent of retry button
+        return retryButton.parentElement?.parentElement || retryButton.parentElement;
+    }
+
+    // Check if elementA appears after elementB in DOM order
+    function appearsAfterInDOM(elementA, elementB) {
+        if (!elementA || !elementB) return false;
+        const position = elementA.compareDocumentPosition(elementB);
+        // DOCUMENT_POSITION_PRECEDING = 2 means elementB comes before elementA
+        return (position & Node.DOCUMENT_POSITION_PRECEDING) !== 0;
+    }
+
+    // Detect success signal: "Thought for" text or task block appearing AFTER the error element
+    function detectSuccessSignalAfter(referenceElement) {
+        // Look for "Thought for" text (indicating AI is thinking again)
+        const allElements = document.querySelectorAll('*');
+        for (const el of allElements) {
+            if (el.textContent?.includes('Thought for') && appearsAfterInDOM(el, referenceElement)) {
+                return { found: true, type: 'thought', element: el };
+            }
+        }
+
+        // Look for task blocks (code output, file changes, etc.)
+        const taskBlocks = document.querySelectorAll('[class*="task"], [class*="code-block"], [class*="diff"]');
+        for (const block of taskBlocks) {
+            if (appearsAfterInDOM(block, referenceElement)) {
+                return { found: true, type: 'task_block', element: block };
+            }
+        }
+
+        return { found: false };
+    }
+
+    // Detect failure signal: new error appearing AFTER the original error position
+    function detectFailureSignalAfter(referenceElement, originalErrorText) {
+        // Look for error icons or error text
+        const errorIcons = document.querySelectorAll('svg[class*="error"], [class*="error-icon"]');
+        for (const icon of errorIcons) {
+            if (appearsAfterInDOM(icon, referenceElement)) {
+                return { found: true, type: 'error_icon', element: icon };
+            }
+        }
+
+        // Look for error text content
+        const allElements = document.querySelectorAll('*');
+        for (const el of allElements) {
+            const text = el.textContent || '';
+            // Check for new error messages (not the original one)
+            if ((text.includes('Error') || text.includes('terminated') || text.includes('failed'))
+                && text !== originalErrorText
+                && appearsAfterInDOM(el, referenceElement)
+                && el.offsetHeight > 0) {
+                return { found: true, type: 'error_text', element: el };
+            }
+        }
+
+        return { found: false };
+    }
+
+    // Observe retry outcome by monitoring DOM changes
+    function observeRetryOutcome(errorContainer, originalErrorText) {
+        return new Promise((resolve) => {
+            const startTime = Date.now();
+            let resolved = false;
+
+            const checkInterval = setInterval(() => {
+                if (resolved) return;
+
+                const elapsed = Date.now() - startTime;
+
+                // Check for success signal
+                const success = detectSuccessSignalAfter(errorContainer);
+                if (success.found) {
+                    resolved = true;
+                    clearInterval(checkInterval);
+                    log(`[RetryObserver] Success detected: ${success.type}`);
+                    resolve({ success: true, reason: success.type });
+                    return;
+                }
+
+                // Check for failure signal
+                const failure = detectFailureSignalAfter(errorContainer, originalErrorText);
+                if (failure.found) {
+                    resolved = true;
+                    clearInterval(checkInterval);
+                    log(`[RetryObserver] Failure detected: ${failure.type}`);
+                    resolve({ success: false, reason: failure.type });
+                    return;
+                }
+
+                // Timeout - assume success if no failure signal (button click may have worked)
+                if (elapsed >= RETRY_OBSERVATION_TIMEOUT) {
+                    resolved = true;
+                    clearInterval(checkInterval);
+                    log(`[RetryObserver] Timeout reached, no clear signal. Assuming success.`);
+                    resolve({ success: true, reason: 'timeout_no_failure' });
+                }
+            }, 500); // Check every 500ms
+        });
     }
 
     async function performClick(selectors) {
@@ -793,12 +912,48 @@
                         continue;
                     }
 
-                    if (findNearbyErrorText(el)) {
+                    const nearbyError = findNearbyErrorText(el);
+                    if (nearbyError) {
                         // It's the "Agent terminated due to error" dialog
                         const delay = Math.floor(Math.random() * 3000) + 2000; // 2000ms to 5000ms
                         log(`[Retry] Detected Antigravity error dialog. Waiting ${delay}ms to simulate human reaction...`);
                         await new Promise(r => setTimeout(r, delay));
                         log(`[Retry] Delay finished. Clicking now.`);
+
+                        // Find error container and record original state BEFORE clicking
+                        const errorContainer = findErrorContainer(el);
+                        const originalErrorText = errorContainer?.textContent || '';
+                        log(`[Retry] Error container found. Original text length: ${originalErrorText.length}`);
+
+                        log(`Clicking: "${buttonText}"`);
+                        el.dispatchEvent(new MouseEvent('click', { view: window, bubbles: true, cancelable: true }));
+                        clicked++;
+
+                        // Use intelligent DOM observation instead of simple disappear check
+                        log(`[RetryObserver] Starting observation for retry outcome...`);
+                        const outcome = await observeRetryOutcome(errorContainer, originalErrorText);
+
+                        if (outcome.success) {
+                            Analytics.trackClick(buttonText, log);
+                            verified++;
+                            log(`[Stats] Retry verified as SUCCESS: ${outcome.reason}`);
+
+                            if (consecutiveRetryFailures > 0) {
+                                log(`[CircuitBreaker] Retry succeeded, resetting failure count from ${consecutiveRetryFailures}`);
+                            }
+                            resetRetryCircuit();
+                        } else {
+                            log(`[Stats] Retry verified as FAILURE: ${outcome.reason}`);
+                            consecutiveRetryFailures++;
+                            log(`[CircuitBreaker] Retry failed. Consecutive failures: ${consecutiveRetryFailures}/${MAX_CONSECUTIVE_RETRY_FAILURES}`);
+
+                            if (consecutiveRetryFailures >= MAX_CONSECUTIVE_RETRY_FAILURES) {
+                                triggerRetryCircuitBreaker();
+                            }
+                        }
+
+                        // Already handled, continue to next element
+                        continue;
                     }
                 }
 
@@ -808,7 +963,7 @@
                 el.dispatchEvent(new MouseEvent('click', { view: window, bubbles: true, cancelable: true }));
                 clicked++;
 
-                // Wait for button to disappear (verification)
+                // Wait for button to disappear (verification) - for non-retry buttons
                 const disappeared = await waitForDisappear(el);
 
                 if (disappeared) {
@@ -817,7 +972,7 @@
                     verified++;
                     log(`[Stats] Click verified (button disappeared)`);
 
-                    // Reset retry circuit on any successful click
+                    // Reset retry circuit on any successful button click (e.g., Run button)
                     if (isRetryButton) {
                         if (consecutiveRetryFailures > 0) {
                             log(`[CircuitBreaker] Retry succeeded, resetting failure count from ${consecutiveRetryFailures}`);
@@ -827,7 +982,7 @@
                 } else {
                     log(`[Stats] Click not verified (button still visible after 500ms)`);
 
-                    // Track retry failures for circuit breaker
+                    // Track retry failures for circuit breaker (fallback for retry without nearby error)
                     if (isRetryButton) {
                         consecutiveRetryFailures++;
                         log(`[CircuitBreaker] Retry failed. Consecutive failures: ${consecutiveRetryFailures}/${MAX_CONSECUTIVE_RETRY_FAILURES}`);
