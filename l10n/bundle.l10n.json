@@ -74,5 +74,8 @@
     "Created \"{0}.app\" on your Desktop. Use this to start the IDE with automation enabled.": "Created \"{0}.app\" on your Desktop. Use this to start the IDE with automation enabled.",
     "Updated start menu entry for {0}. You may need to relogin for changes to take effect.": "Updated start menu entry for {0}. You may need to relogin for changes to take effect.",
     "Auto Accept: BLOCKED": "Auto Accept: BLOCKED",
-    "Auto Accept is enabled but cannot connect. Click to configure.": "Auto Accept is enabled but cannot connect. Click to configure."
+    "Auto Accept is enabled but cannot connect. Click to configure.": "Auto Accept is enabled but cannot connect. Click to configure.",
+    "⚠️ Auto Accept stopped retrying after multiple failures. The AI agent may be stuck.": "⚠️ Auto Accept stopped retrying after multiple failures. The AI agent may be stuck.",
+    "Resume Retry": "Resume Retry",
+    "Open IDE": "Open IDE"
 }

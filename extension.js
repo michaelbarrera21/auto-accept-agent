@@ -849,11 +849,38 @@ async function incrementSessionCount(context) {
 function startStatsCollection(context) {
     if (statsCollectionTimer) clearInterval(statsCollectionTimer);
 
-    // Collect stats every 30 seconds and check for away actions
-    statsCollectionTimer = setInterval(() => {
+    // Collect stats every 30 seconds and check for away actions + notifications
+    statsCollectionTimer = setInterval(async () => {
         if (isRunning) {
             collectAndSaveStats(context);
             checkForAwayActions(context); // Check if user returned from away
+
+            // Check for pending notifications (e.g., retry circuit breaker)
+            if (cdpHandler && cdpHandler.getPendingNotification) {
+                try {
+                    const notification = await cdpHandler.getPendingNotification();
+                    if (notification && notification.type === 'retry_circuit_broken') {
+                        log(`[CircuitBreaker] Received circuit breaker notification. Showing alert...`);
+                        const choice = await vscode.window.showWarningMessage(
+                            Loc.t('⚠️ Auto Accept stopped retrying after multiple failures. The AI agent may be stuck.'),
+                            Loc.t('Resume Retry'),
+                            Loc.t('Open IDE')
+                        );
+                        if (choice === Loc.t('Resume Retry')) {
+                            // Reset circuit breaker
+                            if (cdpHandler.resetRetryCircuit) {
+                                await cdpHandler.resetRetryCircuit();
+                                log(`[CircuitBreaker] User chose to resume retry. Circuit reset.`);
+                            }
+                        } else if (choice === Loc.t('Open IDE')) {
+                            // Bring focus to IDE (no action needed - just dismissing notification)
+                            log(`[CircuitBreaker] User chose to check manually.`);
+                        }
+                    }
+                } catch (e) {
+                    // Ignore notification errors
+                }
+            }
         }
     }, 30000);
 

@@ -415,6 +415,44 @@ for ($i = 0; $i -lt 10; $i++) {
     async getAwayActions() { return 0; } // Placeholder
     async resetStats() { return { clicks: 0, blocked: 0 }; } // Placeholder
     async hideBackgroundOverlay() { } // Placeholder
+
+    /**
+     * Get pending notification from browser (e.g., retry circuit breaker)
+     */
+    async getPendingNotification() {
+        for (const [id] of this.connections) {
+            try {
+                const res = await this._evaluate(id, `
+                    (function() {
+                        const state = window.__autoAcceptState;
+                        if (state && state.pendingNotification) {
+                            const notification = state.pendingNotification;
+                            state.pendingNotification = null; // Clear after reading
+                            return JSON.stringify(notification);
+                        }
+                        return null;
+                    })()
+                `);
+                if (res?.result?.value && res.result.value !== 'null') {
+                    return JSON.parse(res.result.value);
+                }
+            } catch (e) { }
+        }
+        return null;
+    }
+
+    /**
+     * Reset retry circuit breaker in browser
+     */
+    async resetRetryCircuit() {
+        for (const [id] of this.connections) {
+            try {
+                await this._evaluate(id, `
+                    if (window.__autoAcceptResetRetryCircuit) window.__autoAcceptResetRetryCircuit();
+                `);
+            } catch (e) { }
+        }
+    }
 }
 
 module.exports = { CDPHandler };

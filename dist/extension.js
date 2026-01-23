@@ -4861,6 +4861,44 @@ for ($i = 0; $i -lt 10; $i++) {
       async hideBackgroundOverlay() {
       }
       // Placeholder
+      /**
+       * Get pending notification from browser (e.g., retry circuit breaker)
+       */
+      async getPendingNotification() {
+        for (const [id] of this.connections) {
+          try {
+            const res = await this._evaluate(id, `
+                    (function() {
+                        const state = window.__autoAcceptState;
+                        if (state && state.pendingNotification) {
+                            const notification = state.pendingNotification;
+                            state.pendingNotification = null; // Clear after reading
+                            return JSON.stringify(notification);
+                        }
+                        return null;
+                    })()
+                `);
+            if (res?.result?.value && res.result.value !== "null") {
+              return JSON.parse(res.result.value);
+            }
+          } catch (e) {
+          }
+        }
+        return null;
+      }
+      /**
+       * Reset retry circuit breaker in browser
+       */
+      async resetRetryCircuit() {
+        for (const [id] of this.connections) {
+          try {
+            await this._evaluate(id, `
+                    if (window.__autoAcceptResetRetryCircuit) window.__autoAcceptResetRetryCircuit();
+                `);
+          } catch (e) {
+          }
+        }
+      }
     };
     module2.exports = { CDPHandler };
   }
@@ -5921,10 +5959,32 @@ async function incrementSessionCount(context) {
 }
 function startStatsCollection(context) {
   if (statsCollectionTimer) clearInterval(statsCollectionTimer);
-  statsCollectionTimer = setInterval(() => {
+  statsCollectionTimer = setInterval(async () => {
     if (isRunning) {
       collectAndSaveStats(context);
       checkForAwayActions(context);
+      if (cdpHandler && cdpHandler.getPendingNotification) {
+        try {
+          const notification = await cdpHandler.getPendingNotification();
+          if (notification && notification.type === "retry_circuit_broken") {
+            log(`[CircuitBreaker] Received circuit breaker notification. Showing alert...`);
+            const choice = await vscode.window.showWarningMessage(
+              Loc.t("\u26A0\uFE0F Auto Accept stopped retrying after multiple failures. The AI agent may be stuck."),
+              Loc.t("Resume Retry"),
+              Loc.t("Open IDE")
+            );
+            if (choice === Loc.t("Resume Retry")) {
+              if (cdpHandler.resetRetryCircuit) {
+                await cdpHandler.resetRetryCircuit();
+                log(`[CircuitBreaker] User chose to resume retry. Circuit reset.`);
+              }
+            } else if (choice === Loc.t("Open IDE")) {
+              log(`[CircuitBreaker] User chose to check manually.`);
+            }
+          }
+        } catch (e) {
+        }
+      }
     }
   }, 3e4);
   log("ROI Stats: Collection started (every 30s)");

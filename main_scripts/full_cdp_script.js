@@ -744,6 +744,32 @@
         });
     }
 
+    // --- RETRY CIRCUIT BREAKER ---
+    const MAX_CONSECUTIVE_RETRY_FAILURES = 5;
+    let consecutiveRetryFailures = 0;
+    let retryCircuitBroken = false;
+
+    function resetRetryCircuit() {
+        consecutiveRetryFailures = 0;
+        retryCircuitBroken = false;
+    }
+
+    function triggerRetryCircuitBreaker() {
+        retryCircuitBroken = true;
+        log(`[CircuitBreaker] Retry circuit broken after ${MAX_CONSECUTIVE_RETRY_FAILURES} consecutive failures. Will notify user.`);
+
+        // Set notification flag for extension to poll
+        const state = window.__autoAcceptState;
+        if (state) {
+            state.pendingNotification = {
+                type: 'retry_circuit_broken',
+                message: `Auto Accept stopped retrying after ${MAX_CONSECUTIVE_RETRY_FAILURES} consecutive failures. Please check the IDE manually.`,
+                failures: consecutiveRetryFailures,
+                timestamp: Date.now()
+            };
+        }
+    }
+
     async function performClick(selectors) {
         const found = [];
         selectors.forEach(s => queryAll(s).forEach(el => found.push(el)));
@@ -755,9 +781,18 @@
             if (isAcceptButton(el)) {
                 const buttonText = (el.textContent || "").trim();
                 const lowerText = buttonText.toLowerCase();
+                let isRetryButton = false;
 
                 // --- SPECIAL HANDLING FOR RETRY ON ERROR ---
                 if (lowerText.includes('retry')) {
+                    isRetryButton = true;
+
+                    // Check circuit breaker - skip if already broken
+                    if (retryCircuitBroken) {
+                        log(`[CircuitBreaker] Skipping retry - circuit is broken. Waiting for reset.`);
+                        continue;
+                    }
+
                     if (findNearbyErrorText(el)) {
                         // It's the "Agent terminated due to error" dialog
                         const delay = Math.floor(Math.random() * 3000) + 2000; // 2000ms to 5000ms
@@ -781,8 +816,26 @@
                     Analytics.trackClick(buttonText, log);
                     verified++;
                     log(`[Stats] Click verified (button disappeared)`);
+
+                    // Reset retry circuit on any successful click
+                    if (isRetryButton) {
+                        if (consecutiveRetryFailures > 0) {
+                            log(`[CircuitBreaker] Retry succeeded, resetting failure count from ${consecutiveRetryFailures}`);
+                        }
+                        resetRetryCircuit();
+                    }
                 } else {
                     log(`[Stats] Click not verified (button still visible after 500ms)`);
+
+                    // Track retry failures for circuit breaker
+                    if (isRetryButton) {
+                        consecutiveRetryFailures++;
+                        log(`[CircuitBreaker] Retry failed. Consecutive failures: ${consecutiveRetryFailures}/${MAX_CONSECUTIVE_RETRY_FAILURES}`);
+
+                        if (consecutiveRetryFailures >= MAX_CONSECUTIVE_RETRY_FAILURES) {
+                            triggerRetryCircuitBreaker();
+                        }
+                    }
                 }
             }
         }
@@ -976,6 +1029,12 @@
     // --- Set focus state (called from extension - authoritative source) ---
     window.__autoAcceptSetFocusState = function (isFocused) {
         Analytics.setFocusState(isFocused, log);
+    };
+
+    // --- Reset retry circuit breaker (called from extension after user acknowledges) ---
+    window.__autoAcceptResetRetryCircuit = function () {
+        resetRetryCircuit();
+        log(`[CircuitBreaker] Circuit breaker reset by extension`);
     };
 
     window.__autoAcceptStart = function (config) {
