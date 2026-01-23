@@ -230,7 +230,7 @@ async function activate(context) {
             }
 
             // When user returns and auto-accept is running, check for away actions
-            if (e.focused && isEnabled) {
+            if (e.focused && isRunning) {
                 log(`[Away] Window focus detected by VS Code API. Checking for away actions...`);
                 // Wait a tiny bit for CDP to settle after focus state is pushed
                 setTimeout(() => checkForAwayActions(context), 500);
@@ -462,7 +462,7 @@ async function handleFrequencyUpdate(context, freq) {
     pollFrequency = freq;
     await context.globalState.update(FREQ_STATE_KEY, freq);
     log(`Poll frequency updated to: ${freq}ms`);
-    if (isEnabled) {
+    if (isRunning) {
         await syncSessions();
     }
 }
@@ -479,7 +479,7 @@ async function handleBannedCommandsUpdate(context, commands) {
     if (bannedCommands.length > 0) {
         log(`Banned patterns: ${bannedCommands.slice(0, 5).join(', ')}${bannedCommands.length > 5 ? '...' : ''}`);
     }
-    if (isEnabled) {
+    if (isRunning) {
         await syncSessions();
     }
 }
@@ -547,7 +547,7 @@ async function handleBackgroundToggle(context) {
     updateStatusBar();
 
     // Sync sessions in background (don't block)
-    if (isEnabled) {
+    if (isRunning) {
         syncSessions().catch(() => { });
     }
 }
@@ -585,7 +585,7 @@ async function startPolling() {
 
     // Polling now primarily handles the Instance Lock and ensures CDP is active
     pollTimer = setInterval(async () => {
-        if (!isEnabled) return;
+        if (!isRunning) return;
 
         // Check for instance locking - only the first extension instance should control CDP
         const lockKey = `${currentIDE.toLowerCase()}-instance-lock`;
@@ -798,9 +798,9 @@ async function showBackgroundModeUpsell(context) {
 // Check for "away actions" when user returns (called periodically)
 let lastAwayCheck = Date.now();
 async function checkForAwayActions(context) {
-    log(`[Away] checkForAwayActions called. cdpHandler=${!!cdpHandler}, isEnabled=${isEnabled}`);
-    if (!cdpHandler || !isEnabled) {
-        log(`[Away] Skipping check: cdpHandler=${!!cdpHandler}, isEnabled=${isEnabled}`);
+    log(`[Away] checkForAwayActions called. cdpHandler=${!!cdpHandler}, isRunning=${isRunning}`);
+    if (!cdpHandler || !isRunning) {
+        log(`[Away] Skipping check: cdpHandler=${!!cdpHandler}, isRunning=${isRunning}`);
         return;
     }
 
@@ -851,7 +851,7 @@ function startStatsCollection(context) {
 
     // Collect stats every 30 seconds and check for away actions
     statsCollectionTimer = setInterval(() => {
-        if (isEnabled) {
+        if (isRunning) {
             collectAndSaveStats(context);
             checkForAwayActions(context); // Check if user returned from away
         }
@@ -1007,7 +1007,7 @@ async function handleProActivation(context) {
                 pollFrequency = context.globalState.get(FREQ_STATE_KEY, 1000);
 
                 // Sync sessions with new pro status
-                if (isEnabled) {
+                if (isRunning) {
                     await syncSessions();
                 }
 
@@ -1085,7 +1085,7 @@ function startProPolling(context) {
 
             pollFrequency = context.globalState.get(FREQ_STATE_KEY, 1000);
 
-            if (isEnabled) {
+            if (isRunning) {
                 await syncSessions();
             }
 
