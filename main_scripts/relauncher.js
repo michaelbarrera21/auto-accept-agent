@@ -495,7 +495,7 @@ if ($modifiedList.Count -gt 0) {
         try {
             const tempFile = path.join(os.tmpdir(), `relaunch_${Date.now()}.ps1`);
             fs.writeFileSync(tempFile, script, 'utf8');
-            const result = execSync(`powershell - ExecutionPolicy Bypass - File "${tempFile}"`, { encoding: 'utf8' });
+            const result = execSync(`powershell -ExecutionPolicy Bypass -File "${tempFile}"`, { encoding: 'utf8' });
             fs.unlinkSync(tempFile);
             return result;
         } catch (e) {
